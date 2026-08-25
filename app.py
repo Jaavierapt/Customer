@@ -17,6 +17,76 @@ import matplotlib.pyplot as plt
 import tempfile
 import os
 
+@st.cache_resource
+def init_supabase() -> Client:
+    """Inicializa y reutiliza el cliente de Supabase usando credenciales seguras."""
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_supabase()
+def cargar_contactos():
+    """Consulta todos los registros de la tabla 'contactos' en Supabase."""
+    response = supabase.table("contactos").select("*").execute()
+    data = response.data
+    return pd.DataFrame(data)
+
+def guardar_contacto(nombre, email, estado, telefono=""):
+    """Inserta un nuevo contacto en la base de datos de Supabase."""
+    nuevo_registro = {
+        "nombre": nombre,
+        "email": email,
+        "estado": estado,
+        "telefono": telefono
+    }
+    response = supabase.table("contactos").insert(nuevo_registro).execute()
+    return response
+
+# -----------------------------------------------------------------------------
+# 3. INTERFAZ DE USUARIO CON STREAMLIT
+# -----------------------------------------------------------------------------
+st.title("📊 Itelcam CRM")
+st.subheader("Gestión de Clientes y Contactos")
+
+# --- FORMULARIO PARA REGISTRAR NUEVO CONTACTO ---
+with st.expander("➕ Agregar Nuevo Contacto", expanded=False):
+    with st.form("form_nuevo_contacto", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            nombre = st.text_input("Nombre completo *")
+            email = st.text_input("Correo electrónico *")
+        with col2:
+            telefono = st.text_input("Teléfono")
+            estado = st.selectbox("Estado del Cliente", ["Novedad", "En Negociación", "Cerrado", "Perdido"])
+        
+        submitted = st.form_submit_button("Guardar Registro")
+        
+        if submitted:
+            if nombre and email:
+                try:
+                    guardar_contacto(nombre, email, estado, telefono)
+                    st.success(f"¡Cliente {nombre} registrado exitosamente!")
+                except Exception as e:
+                    st.error(f"Error al guardar en Supabase: {e}")
+            else:
+                st.warning("Por favor completa los campos obligatorios (*).")
+
+# --- VISUALIZACIÓN DE TABLA EN TIEMPO REAL ---
+st.markdown("---")
+st.subheader("📋 Lista de Contactos Registrados")
+
+df_contactos = cargar_contactos()
+
+if not df_contactos.empty:
+    st.dataframe(
+        df_contactos,
+        use_container_width=True,
+        hide_index=True
+    )
+    st.caption(f"Total de registros cargados: {len(df_contactos)}")
+else:
+    st.info("Aún no hay contactos registrados en la base de datos.")
+
 # --- Lógica de IA simulada / local (VS Code / Entorno de desarrollo) ---
 def obtener_consejo_ia(notas_bitacora):
     return (
