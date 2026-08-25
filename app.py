@@ -1,23 +1,26 @@
-import streamlit as st
-
-# Configuración única al inicio
-st.set_page_config(page_title="Itelcam CRM", layout="wide")
-st.title("🚀 Itelcam CRM - Gestión Estratégica")
-
-# --- Gestión de Navegación Persistente con st.session_state ---
-if "active_tab" not in st.session_state:
-    st.session_state["active_tab"] = 0
-
+import os
+import io
+import tempfile
+from datetime import datetime
 import pandas as pd
 import plotly.express as px
 from fpdf import FPDF
-import io
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import tempfile
-import os
 from supabase import create_client, Client
+import streamlit as st
+
+# --- CONFIGURACIÓN ÚNICA AL INICIO ---
+st.set_page_config(page_title="Itelcam CRM", layout="wide")
+
+# --- GESTIÓN DE NAVEGACIÓN PERSISTENTE ---
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = 0
+
+# =============================================================================
+# 1. FUNCIONES DE BACKEND, BASE DE DATOS Y LÓGICA GLOBALES
+# =============================================================================
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -27,9 +30,10 @@ def init_supabase() -> Client:
     return create_client(url, key)
 
 supabase = init_supabase()
+
 def cargar_contactos():
-    """Consulta todos los registros de la tabla 'contactos' en Supabase."""
-    response = supabase.table("contactos").select("*").execute()
+    """Consulta todos los registros de la tabla 'Contactos' en Supabase."""
+    response = supabase.table("Contactos").select("*").execute()
     data = response.data
     return pd.DataFrame(data)
 
@@ -41,55 +45,9 @@ def guardar_contacto(nombre, email, estado, telefono=""):
         "estado": estado,
         "telefono": telefono
     }
-    response = supabase.table("contactos").insert(nuevo_registro).execute()
+    response = supabase.table("Contactos").insert(nuevo_registro).execute()
     return response
 
-# -----------------------------------------------------------------------------
-# 3. INTERFAZ DE USUARIO CON STREAMLIT
-# -----------------------------------------------------------------------------
-st.title("📊 Itelcam CRM")
-st.subheader("Gestión de Clientes y Contactos")
-
-# --- FORMULARIO PARA REGISTRAR NUEVO CONTACTO ---
-with st.expander("➕ Agregar Nuevo Contacto", expanded=False):
-    with st.form("form_nuevo_contacto", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            nombre = st.text_input("Nombre completo *")
-            email = st.text_input("Correo electrónico *")
-        with col2:
-            telefono = st.text_input("Teléfono")
-            estado = st.selectbox("Estado del Cliente", ["Novedad", "En Negociación", "Cerrado", "Perdido"])
-        
-        submitted = st.form_submit_button("Guardar Registro")
-        
-        if submitted:
-            if nombre and email:
-                try:
-                    guardar_contacto(nombre, email, estado, telefono)
-                    st.success(f"¡Cliente {nombre} registrado exitosamente!")
-                except Exception as e:
-                    st.error(f"Error al guardar en Supabase: {e}")
-            else:
-                st.warning("Por favor completa los campos obligatorios (*).")
-
-# --- VISUALIZACIÓN DE TABLA EN TIEMPO REAL ---
-st.markdown("---")
-st.subheader("📋 Lista de Contactos Registrados")
-
-df_contactos = cargar_contactos()
-
-if not df_contactos.empty:
-    st.dataframe(
-        df_contactos,
-        use_container_width=True,
-        hide_index=True
-    )
-    st.caption(f"Total de registros cargados: {len(df_contactos)}")
-else:
-    st.info("Aún no hay contactos registrados en la base de datos.")
-
-# --- Lógica de IA simulada / local (VS Code / Entorno de desarrollo) ---
 def obtener_consejo_ia(notas_bitacora):
     return (
         "💡 **Consejo de IA (Entorno Local / VS Code):**\n"
@@ -97,9 +55,6 @@ def obtener_consejo_ia(notas_bitacora):
         "2. Propón una reunión de seguimiento enfocada en resolver dudas técnicas o comerciales.\n"
         "3. Envía un correo con un resumen de valor antes de la próxima llamada."
     )
-
-# --- Funciones de Lógica de Semáforo ---
-from datetime import datetime
 
 def calcular_semaforo_avanzado(row):
     hoy = pd.Timestamp(datetime.now().date())
@@ -112,10 +67,10 @@ def calcular_semaforo_avanzado(row):
     else:
         if row.get('Requiere_GES') == 'Sí' and pd.isna(row.get('Fecha_GES')):
             return 'Naranjo (Pendiente emisión GES)'
-         
+          
         if pd.isna(row.get('Fecha_Vencimiento')):
             return 'Sin Fecha Vencimiento'
-         
+          
         dias_vencido = (hoy - row['Fecha_Vencimiento']).days
         if dias_vencido <= 0:
             return 'Azul/Verde (Al día / Por vencer)'
@@ -135,7 +90,7 @@ def color_semaforo(val):
         return 'background-color: #ffedd5; color: #9a3412;'
     return ''
 
-# --- 1. Configuración de Usuarios y Roles ---
+# --- CONFIGURACIÓN DE USUARIOS Y ROLES ---
 USERS = {
     "javiera.ponce@itelcam.cl": {"role": "admin", "pass": "Itelcam2026"},
     "sandro.cannizzo@itelcam.cl": {"role": "viewer", "pass": "Itelcam2026"},
@@ -149,6 +104,7 @@ def check_password():
         st.session_state["user_email"] = None
 
     if not st.session_state["logged_in"]:
+        st.title("🚀 Itelcam CRM - Gestión Estratégica")
         email = st.text_input("Correo Institucional", key="login_email")
         password = st.text_input("Contraseña", type="password", key="login_password")
         if st.button("Ingresar"):
@@ -162,7 +118,6 @@ def check_password():
         return False
     return True
 
-# --- Función Generar PDF ---
 def generar_pdf(df_original):
     df = df_original.dropna(subset=['Fecha_Pago']).copy()
     pdf = FPDF()
@@ -299,7 +254,9 @@ def generar_pdf(df_original):
     return pdf.output(dest='S').encode('latin-1')
 
 
-# --- 2. BLOQUE PRINCIPAL ---
+# =============================================================================
+# 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
+# =============================================================================
 if check_password():
     RUTA_MAESTRA = "H:/Ingresos.xlsx" if os.path.exists("H:/Ingresos.xlsx") else "Ingresos.xlsx"
     ARCHIVO_CONTACTOS = "contactos.csv"
@@ -340,8 +297,10 @@ if check_password():
             st.session_state["logged_in"] = False
             st.rerun()
 
+    # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 CRM Itelcam - Gestión Estratégica")
 
+    # --- CARGA DE DATOS LOCALES EXCEL / CSV ---
     @st.cache_data
     def cargar_datos():
         df = pd.read_excel(RUTA_MAESTRA)
@@ -349,7 +308,6 @@ if check_password():
         
         # --- LIMPIEZA ROBUSTA DE MONTO ---
         if 'Monto' in df.columns:
-            # Si la columna tiene strings con '$', puntos o comas
             if df['Monto'].dtype == object or str(df['Monto'].dtype).startswith('string'):
                 df['Monto'] = (
                     df['Monto'].astype(str)
@@ -394,6 +352,8 @@ if check_password():
    
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
+    
+    # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
     if 'Rol_Contacto' not in df_contactos.columns:
@@ -774,11 +734,9 @@ if check_password():
                             "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
                             "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
                             "Fecha_Pago": fecha_pago_final,
-                            "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
                             "Semáforo": "",
                             "Estado": n_estado_pago,
-                            "Requiere_GES": n_req_ges,
-                            "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT
+                            "Requiere_GES": n_req_ges
                         }])
                         df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
                         df_actualizado.to_excel(RUTA_MAESTRA, index=False)
@@ -1051,6 +1009,59 @@ if check_password():
 
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
        
+        # =====================================================================
+        # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
+        # =====================================================================
+        with st.expander("➕ Crear Nuevo Contacto", expanded=True):
+            with st.form("form_contacto_unificado"):
+                c1, c2 = st.columns(2)
+                nombre = c1.text_input("Nombre completo *")
+                empresa = c2.text_input("Empresa *")
+                planta = c1.text_input("Planta")
+                correo = c2.text_input("Correo electrónico *")
+                celular = c1.text_input("Celular")
+                estado = c2.selectbox("Estado del Cliente", estados)
+                rol = c1.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"])
+                valor = c2.number_input("Valor", min_value=0.0, step=1000.0)
+
+                submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
+
+                if submitted:
+                    if nombre and correo and empresa:
+                        # 1. Guardar en Supabase usando la función que conectamos arriba
+                        try:
+                            guardar_contacto(nombre, correo, estado, celular)
+                            supa_success = True
+                        except Exception as e:
+                            st.error(f"Error al guardar en Supabase: {e}")
+                            supa_success = False
+
+                        # 2. Guardar en Local (CSV) para actualizar tu gráfico de Embudo
+                        nueva = pd.DataFrame([{
+                            "Nombre": nombre,
+                            "Empresa": empresa,
+                            "Planta": planta,
+                            "Correo": correo,
+                            "Celular": celular,
+                            "Estado": estado,
+                            "Valor": valor,
+                            "Bitacora": "",
+                            "Rol_Contacto": rol
+                        }])
+                        pd.concat([df_contactos, nueva], ignore_index=True).to_csv(ARCHIVO_CONTACTOS, index=False)
+                        
+                        if supa_success:
+                            st.success(f"¡Cliente {nombre} registrado exitosamente en Supabase y Embudo Local!")
+                        else:
+                            st.warning(f"¡Cliente {nombre} guardado en tu sistema local, pero hubo un error de conexión con Supabase!")
+                            
+                        st.session_state["active_tab"] = 4
+                        st.rerun()
+                    else:
+                        st.warning("Por favor completa los campos obligatorios (*).")
+        
+        st.divider()
+
         st.subheader("📊 Gráfico de Conversión")
         conteo_estados = df_contactos['Estado'].value_counts().reindex(estados).fillna(0).reset_index()
         conteo_estados.columns = ['Etapa', 'Cantidad']
@@ -1306,35 +1317,6 @@ if check_password():
                     st.rerun()
 
         st.divider()
-
-        st.subheader("⚙️ Gestión de Contactos")
-       
-        with st.expander("➕ Crear nuevo contacto"):
-            with st.form("form_contacto"):
-                c1, c2 = st.columns(2)
-                nombre = c1.text_input("Nombre")
-                empresa = c2.text_input("Empresa")
-                planta = c1.text_input("Planta")
-                correo = c2.text_input("Correo")
-                celular = c1.text_input("Celular")
-                estado = c2.selectbox("Estado", estados)
-                rol = c1.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"])
-                valor = c2.number_input("Valor")
-                if st.form_submit_button("Guardar"):
-                    nueva = pd.DataFrame([{
-                        "Nombre": nombre,
-                        "Empresa": empresa,
-                        "Planta": planta,
-                        "Correo": correo,
-                        "Celular": celular,
-                        "Estado": estado,
-                        "Valor": valor,
-                        "Bitacora": "",
-                        "Rol_Contacto": rol
-                    }])
-                    pd.concat([df_contactos, nueva], ignore_index=True).to_csv(ARCHIVO_CONTACTOS, index=False)
-                    st.session_state["active_tab"] = 4
-                    st.rerun()
 
         with st.expander("✏️ Editar contactos existentes"):
             for idx, row in df_contactos.iterrows():
