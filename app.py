@@ -1,7 +1,8 @@
 import streamlit as st
 
 # Configuración única al inicio
-st.set_page_config(page_title="Itelcam Pro", layout="wide")
+st.set_page_config(page_title="Itelcam CRM", layout="wide")
+st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
 # --- Gestión de Navegación Persistente con st.session_state ---
 if "active_tab" not in st.session_state:
