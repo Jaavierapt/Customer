@@ -16,6 +16,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import tempfile
 import os
+from supabase import create_client, Client
 
 @st.cache_resource
 def init_supabase() -> Client:
