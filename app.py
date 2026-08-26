@@ -701,13 +701,18 @@ if check_password():
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
                     
                     n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
+                    
+                    # Nuevos campos de ejecución
+                    n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
+                    n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
+
                 with fc2:
                     n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
                     if n_estado_pago == "Pagado":
                         n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
                     else:
                         n_f_pago = st.date_input("Fecha de Pago", value=None)
-                       
+                        
                     n_f_cot = st.date_input("Fecha Cotización", value=None)
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
                     n_f_emi = st.date_input("Fecha Emisión", value=None)
@@ -715,11 +720,11 @@ if check_password():
                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
-               
+                
                 if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                       
+                        
                         nueva_fila = pd.DataFrame([{
                             "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
@@ -727,6 +732,8 @@ if check_password():
                             "Grupo Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
                             "Monto": n_monto,
+                            "Dias_Programados": n_dias_prog,
+                            "Dias_Reales": n_dias_real,
                             "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
                             "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
                             "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
@@ -769,6 +776,15 @@ if check_password():
                 # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                 
+                # Cálculo de KPIs de eficiencia y cobro para el detalle
+                d_prog = row_det.get('Dias_Programados', 0)
+                d_real = row_det.get('Dias_Reales', 0)
+                desviacion = d_real - d_prog
+                
+                f_emi_val = row_det.get('Fecha_Emision')
+                f_pago_val = row_det.get('Fecha_Pago')
+                dias_cobro = (pd.to_datetime(f_pago_val) - pd.to_datetime(f_emi_val)).days if pd.notna(f_emi_val) and pd.notna(f_pago_val) else "N/A"
+
                 # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
@@ -779,6 +795,9 @@ if check_password():
                         st.markdown(f"**Grupo de Servicio:** {row_det.get('Grupo Servicio', 'N/A')}")
                         st.markdown(f"**Servicio Entregado:** {row_det.get('Servicio', 'N/A')}")
                         st.markdown(f"**Monto:** ${row_det.get('Monto', 0):,.0f}")
+                        st.markdown(f"**Días Programados:** {d_prog}")
+                        st.markdown(f"**Días Reales:** {d_real}")
+                        st.markdown(f"**Desviación de Ejecución:** {desviacion:+g} días")
                         
                     with dc2:
                         st.markdown(f"**Fecha Cotización:** {str(row_det.get('Fecha_Cotizacion', 'N/A')).split(' ')[0]}")
@@ -787,9 +806,9 @@ if check_password():
                         st.markdown(f"**Fecha de Vencimiento:** {str(row_det.get('Fecha_Vencimiento', 'N/A')).split(' ')[0]}")
                         
                     with dc3:
-                        f_pago_val = row_det.get('Fecha_Pago')
                         f_pago_str = str(f_pago_val).split(' ')[0] if pd.notna(f_pago_val) else "Pendiente de pago"
                         st.markdown(f"**Fecha de Pago:** {f_pago_str}")
+                        st.markdown(f"**Días en Cobrar (desde Emisión):** {dias_cobro}")
                         st.markdown(f"**Semáforo:** {row_det.get('Semáforo', 'N/A')}")
                         st.markdown(f"**¿Requiere GES?:** {row_det.get('Requiere_GES', 'No')}")
                         f_ges_val = row_det.get('Fecha_GES')
