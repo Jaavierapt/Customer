@@ -253,7 +253,6 @@ def generar_pdf(df_original):
 
     return pdf.output(dest='S').encode('latin-1')
 
-
 # =============================================================================
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
@@ -747,259 +746,85 @@ if check_password():
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         st.divider()
-       
-        st.subheader("⏱️ KPIs de Ciclicidad y Eficiencia Comercial")
-       
-        df_2026_ciclos = df[df['Fecha_Pago'].dt.year == 2026].copy()
-       
-        if not df_2026_ciclos.empty:
-            df_2026_ciclos['Dias_Cot_OC'] = (df_2026_ciclos['Fecha_OC'] - df_2026_ciclos['Fecha_Cotizacion']).dt.days
-            df_2026_ciclos['Dias_OC_Emision'] = (df_2026_ciclos['Fecha_Emision'] - df_2026_ciclos['Fecha_OC']).dt.days
-            df_2026_ciclos['Dias_GES_Emision'] = (df_2026_ciclos['Fecha_Emision'] - df_2026_ciclos['Fecha_GES']).dt.days
-            df_2026_ciclos['DSO_Real'] = (df_2026_ciclos['Fecha_Pago'] - df_2026_ciclos['Fecha_Emision']).dt.days
-           
-            prom_cot_oc = df_2026_ciclos['Dias_Cot_OC'].mean()
-            prom_oc_emision = df_2026_ciclos['Dias_OC_Emision'].mean()
-            prom_dso = df_2026_ciclos['DSO_Real'].mean()
-           
-            kc1, kc2, kc3 = st.columns(3)
-            kc1.metric("Prom. Cierre (Cot → OC)", f"{prom_cot_oc:.1f} días" if pd.notna(prom_cot_oc) else "Sin datos")
-            kc2.metric("Prom. Admin (OC → Factura)", f"{prom_oc_emision:.1f} días" if pd.notna(prom_oc_emision) else "Sin datos")
-            kc3.metric("DSO Real (Factura → Pago)", f"{prom_dso:.1f} días" if pd.notna(prom_dso) else "Sin datos")
-        else:
-            st.info("Aún no hay registros de pagos en 2026 para calcular los KPIs de ciclicidad.")
-           
-        st.divider()
-
-        st.subheader("🔄 Análisis Detallado de Ciclicidad por Empresa y Servicio")
-        if not df.empty:
-            df_ciclo = df.copy()
-            df_ciclo['T_Cot_OC'] = (df_ciclo['Fecha_OC'] - df_ciclo['Fecha_Cotizacion']).dt.days
-            df_ciclo['T_OC_Emision'] = (df_ciclo['Fecha_Emision'] - df_ciclo['Fecha_OC']).dt.days
-            df_ciclo['T_Emision_Pago'] = (df_ciclo['Fecha_Pago'] - df_ciclo['Fecha_Emision']).dt.days
-           
-            col_serv = 'Grupo Servicio' if 'Grupo Servicio' in df_ciclo.columns else df_ciclo.columns[0]
-           
-            f_col1, f_col2 = st.columns(2)
-            with f_col1:
-                filtro_empresa_ciclo = st.selectbox("Filtrar por Empresa:", options=["Todas"] + sorted(df_ciclo['Empresa'].dropna().unique().tolist()), key="filtro_empresa_ciclo")
-            with f_col2:
-                filtro_servicio_ciclo = st.selectbox("Filtrar por Servicio:", options=["Todos"] + sorted(df_ciclo[col_serv].dropna().unique().tolist()), key="filtro_servicio_ciclo")
-           
-            df_ciclo_filtrado = df_ciclo.copy()
-            if filtro_empresa_ciclo != "Todas":
-                df_ciclo_filtrado = df_ciclo_filtrado[df_ciclo_filtrado['Empresa'] == filtro_empresa_ciclo]
-            if filtro_servicio_ciclo != "Todos":
-                df_ciclo_filtrado = df_ciclo_filtrado[df_ciclo_filtrado[col_serv] == filtro_servicio_ciclo]
-           
-            prom_cot_oc_f = df_ciclo_filtrado['T_Cot_OC'].mean()
-            prom_oc_emi_f = df_ciclo_filtrado['T_OC_Emision'].mean()
-            prom_emi_pag_f = df_ciclo_filtrado['T_Emision_Pago'].mean()
-           
-            fc1, fc2, fc3 = st.columns(3)
-            fc1.metric("Prom. Cotización → OC", f"{prom_cot_oc_f:.1f} días" if pd.notna(prom_cot_oc_f) else "Sin datos")
-            fc2.metric("Prom. OC → Emisión", f"{prom_oc_emi_f:.1f} días" if pd.notna(prom_oc_emi_f) else "Sin datos")
-            fc3.metric("Prom. Emisión → Pago", f"{prom_emi_pag_f:.1f} días" if pd.notna(prom_emi_pag_f) else "Sin datos")
-           
-            df_agrupado_emp = df_ciclo.groupby('Empresa')[['T_Cot_OC', 'T_OC_Emision', 'T_Emision_Pago']].mean().reset_index()
-            df_agrupado_serv = df_ciclo.groupby(col_serv)[['T_Cot_OC', 'T_OC_Emision', 'T_Emision_Pago']].mean().reset_index()
-           
-            gc1, gc2 = st.columns(2)
-            with gc1:
-                df_melt_emp = df_agrupado_emp.melt(id_vars=['Empresa'], value_vars=['T_Cot_OC', 'T_OC_Emision', 'T_Emision_Pago'], var_name='Etapa', value_name='Dias')
-                df_melt_emp['Etapa'] = df_melt_emp['Etapa'].map({'T_Cot_OC': 'Cot → OC', 'T_OC_Emision': 'OC → Emisión', 'T_Emision_Pago': 'Emisión → Pago'})
-                fig_ciclo_emp = px.bar(df_melt_emp, x='Empresa', y='Dias', color='Etapa', barmode='group', title="Tiempos Promedio de Ciclo por Empresa")
-                st.plotly_chart(fig_ciclo_emp, use_container_width=True)
-            with gc2:
-                df_melt_serv = df_agrupado_serv.melt(id_vars=[col_serv], value_vars=['T_Cot_OC', 'T_OC_Emision', 'T_Emision_Pago'], var_name='Etapa', value_name='Dias')
-                df_melt_serv['Etapa'] = df_melt_serv['Etapa'].map({'T_Cot_OC': 'Cot → OC', 'T_OC_Emision': 'OC → Emisión', 'T_Emision_Pago': 'Emisión → Pago'})
-                fig_ciclo_serv = px.bar(df_melt_serv, x=col_serv, y='Dias', color='Etapa', barmode='group', title="Tiempos Promedio de Ciclo por Servicio")
-                st.plotly_chart(fig_ciclo_serv, use_container_width=True)
-        st.divider()
-
-        st.subheader("⚠️ Análisis de Mayores Demoras en Pagos (Empresas y Servicios)")
-        if not df.empty and 'Fecha_Pago' in df.columns and 'Fecha_Emision' in df.columns:
-            df_pagadas = df[df['Fecha_Pago'].notna() & df['Fecha_Emision'].notna()].copy()
-            if not df_pagadas.empty:
-                df_pagadas['Dias_Demora_Pago'] = (df_pagadas['Fecha_Pago'] - df_pagadas['Fecha_Emision']).dt.days
-               
-                max_demora_empresa = df_pagadas.groupby('Empresa')['Dias_Demora_Pago'].mean().reset_index()
-                max_demora_empresa = max_demora_empresa.sort_values(by='Dias_Demora_Pago', ascending=False)
-               
-                col_serv = 'Grupo Servicio' if 'Grupo Servicio' in df_pagadas.columns else df_pagadas.columns[0]
-                max_demora_servicio = df_pagadas.groupby(col_serv)['Dias_Demora_Pago'].mean().reset_index()
-                max_demora_servicio = max_demora_servicio.sort_values(by='Dias_Demora_Pago', ascending=False)
-               
-                top_empresa = max_demora_empresa.iloc[0]['Empresa'] if not max_demora_empresa.empty else "N/A"
-                top_empresa_dias = max_demora_empresa.iloc[0]['Dias_Demora_Pago'] if not max_demora_empresa.empty else 0
-                top_servicio = max_demora_servicio.iloc[0][col_serv] if not max_demora_servicio.empty else "N/A"
-                top_servicio_dias = max_demora_servicio.iloc[0]['Dias_Demora_Pago'] if not max_demora_servicio.empty else 0
-               
-                kp1, kp2 = st.columns(2)
-                kp1.metric("Empresa con Mayor Demora Promedio", f"{top_empresa}", f"{top_empresa_dias:.1f} días")
-                kp2.metric("Servicio con Mayor Demora Promedio", f"{top_servicio}", f"{top_servicio_dias:.1f} días")
-               
-                g1, g2 = st.columns(2)
-                with g1:
-                    fig_emp_demora = px.bar(
-                        max_demora_empresa.head(10),
-                        x='Dias_Demora_Pago',
-                        y='Empresa',
-                        orientation='h',
-                        title="Top Empresas con Mayor Demora de Pago",
-                        labels={'Dias_Demora_Pago': 'Promedio Días de Demora', 'Empresa': 'Empresa'}
-                    )
-                    fig_emp_demora.update_layout(yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_emp_demora, use_container_width=True)
-                with g2:
-                    fig_serv_demora = px.bar(
-                        max_demora_servicio.head(10),
-                        x='Dias_Demora_Pago',
-                        y=col_serv,
-                        orientation='h',
-                        title="Top Servicios con Mayor Demora de Pago",
-                        labels={'Dias_Demora_Pago': 'Promedio Días de Demora', col_serv: 'Servicio'}
-                    )
-                    fig_serv_demora.update_layout(yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_serv_demora, use_container_width=True)
-               
-                st.subheader("📋 Listado Detallado de Demoras por Empresa")
-                st.dataframe(max_demora_empresa, use_container_width=True, hide_index=True)
-            else:
-                st.info("No hay suficientes registros de fechas de pago para calcular las demoras.")
-        st.divider()
-
-        st.subheader("📊 Reporte de Antigüedad de Deuda")
-        if not df.empty:
-            hoy_aging = pd.Timestamp(datetime.now().date())
-            df_aging = df[df['Fecha_Pago'].isna() & df['Fecha_Vencimiento'].notna()].copy()
-            if not df_aging.empty:
-                df_aging['Dias_Mora'] = (hoy_aging - df_aging['Fecha_Vencimiento']).dt.days
-                def clasificar_mora(dias):
-                    if dias <= 0:
-                        return '1. Al día / Por vencer'
-                    elif dias <= 30:
-                        return '2. 1 a 30 días vencido'
-                    elif dias <= 60:
-                        return '3. 31 a 60 días vencido'
-                    else:
-                        return '4. Más de 60 días vencido'
-                df_aging['Rango_Mora'] = df_aging['Dias_Mora'].apply(clasificar_mora)
-                df_aging_resumen = df_aging.groupby('Rango_Mora')['Monto'].sum().reset_index()
-                fig_aging = px.bar(
-                    df_aging_resumen,
-                    x='Rango_Mora',
-                    y='Monto',
-                    title="Monto Adeudado por Antigüedad de Vencimiento",
-                    color='Rango_Mora',
-                    labels={'Monto': 'Deuda Total ($)', 'Rango_Mora': 'Rango de Antigüedad'}
-                )
-                st.plotly_chart(fig_aging, use_container_width=True)
-            else:
-                st.success("¡No hay facturas pendientes sin pagar registradas!")
-        st.divider()
 
         if 'Fecha_Vencimiento' in df.columns:
             df['Semáforo'] = df.apply(calcular_semaforo_avanzado, axis=1)
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
 
-        st.subheader("📊 Historial General")
-       
+        # =====================================================================
+        # ÚNICO HISTORIAL GENERAL Y MENÚ DESPLEGABLE DE DETALLE
+        # =====================================================================
+        st.subheader("📊 Historial General de Facturas")
+        
         df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
-            
-        configuracion_columnas = {
-            "Estado": st.column_config.SelectboxColumn(
-                "Estado del Servicio/Cobro",
-                options=["Esperando OC", "Servicio Ejecutado", "Pagado", "PENDIENTE"],
-                required=True,
-            )
-        }
-       
-        df_editado = st.data_editor(
-            df,
-            column_config=configuracion_columnas,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        if st.button("💾 Guardar cambios de estados"):
-            df_editado.to_excel(RUTA_MAESTRA, index=False)
-            st.cache_data.clear()
-            st.session_state["active_tab"] = 3
-            st.rerun()
-
-        st.divider()
-
-        st.subheader("🔍 Historial Detallado con Semáforo")
+        
         if not df.empty:
-            try:
-                df_styled = df.style.map(color_semaforo, subset=['Semáforo'])
-            except AttributeError:
-                df_styled = df.style.applymap(color_semaforo, subset=['Semáforo'])
-            st.dataframe(df_styled, use_container_width=True, hide_index=True)
+            # 1. Menú desplegable preliminar para elegir la factura y ver su detalle completo
+            st.write("### 🔍 Detalle Extendido por Factura")
+            lista_facturas = df['Factura'].astype(str).tolist() if 'Factura' in df.columns else []
+            if lista_facturas:
+                factura_seleccionada = st.selectbox("Selecciona una factura del historial para ver su información detallada:", lista_facturas)
+                
+                # Filtrar la fila correspondiente
+                row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
+                
+                # Desplegable con todo el detalle técnico solicitado
+                with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
+                    dc1, dc2, dc3 = st.columns(3)
+                    
+                    with dc1:
+                        st.markdown(f"**Empresa:** {row_det.get('Empresa', 'N/A')}")
+                        st.markdown(f"**Planta:** {row_det.get('Planta', 'N/A')}")
+                        st.markdown(f"**Grupo de Servicio:** {row_det.get('Grupo Servicio', 'N/A')}")
+                        st.markdown(f"**Servicio Entregado:** {row_det.get('Servicio', 'N/A')}")
+                        st.markdown(f"**Monto:** ${row_det.get('Monto', 0):,.0f}")
+                        
+                    with dc2:
+                        st.markdown(f"**Fecha Cotización:** {str(row_det.get('Fecha_Cotizacion', 'N/A')).split(' ')[0]}")
+                        st.markdown(f"**Fecha Orden de Compra (OC):** {str(row_det.get('Fecha_OC', 'N/A')).split(' ')[0]}")
+                        st.markdown(f"**Fecha Emisión:** {str(row_det.get('Fecha_Emision', 'N/A')).split(' ')[0]}")
+                        st.markdown(f"**Fecha de Vencimiento:** {str(row_det.get('Fecha_Vencimiento', 'N/A')).split(' ')[0]}")
+                        
+                    with dc3:
+                        f_pago_val = row_det.get('Fecha_Pago')
+                        f_pago_str = str(f_pago_val).split(' ')[0] if pd.notna(f_pago_val) else "Pendiente de pago"
+                        st.markdown(f"**Fecha de Pago:** {f_pago_str}")
+                        st.markdown(f"**Semáforo:** {row_det.get('Semáforo', 'N/A')}")
+                        st.markdown(f"**¿Requiere GES?:** {row_det.get('Requiere_GES', 'No')}")
+                        f_ges_val = row_det.get('Fecha_GES')
+                        f_ges_str = str(f_ges_val).split(' ')[0] if pd.notna(f_ges_val) else "N/A / No aplica"
+                        st.markdown(f"**Fecha GES:** {f_ges_str}")
+
+            st.divider()
+
+            # 2. Tabla general limpia y simplificada (Número, Empresa, Planta, Monto, Estado)
+            st.write("### 📋 Listado General Preliminar")
+            columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
+            
+            configuracion_columnas = {
+                "Estado": st.column_config.SelectboxColumn(
+                    "Estado del Servicio/Cobro",
+                    options=["Esperando OC", "Servicio Ejecutado", "Pagado", "PENDIENTE"],
+                    required=True,
+                )
+            }
+           
+            df_editado = st.data_editor(
+                df[columnas_esenciales],
+                column_config=configuracion_columnas,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            if st.button("💾 Guardar cambios de estados"):
+                df.update(df_editado[['Estado']])
+                df.to_excel(RUTA_MAESTRA, index=False)
+                st.cache_data.clear()
+                st.session_state["active_tab"] = 3
+                st.rerun()
 
         st.divider()
-
-        st.subheader("📂 Cuenta Centralizada e Historial por Empresa")
-        st.info("💡 Al seleccionar una empresa, el sistema audita y centraliza automáticamente todos sus registros, transacciones e hitos históricos.")
-       
-        empresa_busqueda = st.selectbox("Selecciona empresa para ver cuenta centralizada:", options=sorted(df['Empresa'].unique()), key="busqueda_hitos_empresa")
-       
-        df_historial = df[df['Empresa'] == empresa_busqueda]
-       
-        total_facturado_cta = df_historial['Monto'].sum()
-        total_facturas_cta = len(df_historial)
-       
-        m_c1, m_c2 = st.columns(2)
-        m_c1.metric(f"Total Histórico Pagado - {empresa_busqueda}", f"${total_facturado_cta:,.0f}")
-        m_c2.metric("Total de Registros / Documentos", f"{total_facturas_cta} documentos")
-       
-        if not df_historial.empty:
-            try:
-                df_hist_styled = df_historial.style.map(color_semaforo, subset=['Semáforo'])
-            except AttributeError:
-                df_hist_styled = df_historial.style.applymap(color_semaforo, subset=['Semáforo'])
-            st.dataframe(df_hist_styled, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No se encontraron registros para esta empresa.")
-
-        st.divider()
-
-        if st.session_state["role"] == "admin":
-            with st.expander("🛠️ Actualizar Hitos de Facturas (Cotización, OC, GES, Pago)"):
-                with st.form("form_actualizar_hitos"):
-                    factura_sel = st.selectbox("Selecciona Factura a Editar", df['Factura'].unique())
-                   
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        n_cotizacion = st.date_input("Fecha Cotización", value=None)
-                        n_oc = st.date_input("Fecha Orden de Compra (OC)")
-                        n_ges = st.date_input("Fecha GES (si aplica)", value=None)
-                    with c2:
-                        n_emision = st.date_input("Fecha Emisión Factura")
-                        n_venc = st.date_input("Fecha Vencimiento")
-                        n_pago = st.date_input("Fecha de Pago Efectivo", value=None)
-                        req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"])
-                   
-                    if st.form_submit_button("💾 Guardar Hitos y Actualizar Semáforo"):
-                        idx_act = df[df['Factura'] == factura_sel].index
-                        if not idx_act.empty:
-                            df.loc[idx_act, 'Fecha_Cotizacion'] = pd.to_datetime(n_cotizacion) if n_cotizacion else pd.NaT
-                            df.loc[idx_act, 'Fecha_OC'] = pd.to_datetime(n_oc)
-                            df.loc[idx_act, 'Fecha_GES'] = pd.to_datetime(n_ges) if n_ges else pd.NaT
-                            df.loc[idx_act, 'Fecha_Emision'] = pd.to_datetime(n_emision)
-                            df.loc[idx_act, 'Fecha_Vencimiento'] = pd.to_datetime(n_venc)
-                            df.loc[idx_act, 'Fecha_Pago'] = pd.to_datetime(n_pago) if n_pago else pd.NaT
-                            df.loc[idx_act, 'Requiere_GES'] = req_ges
-                           
-                            df.to_excel(RUTA_MAESTRA, index=False)
-                            st.cache_data.clear()
-                            st.session_state["active_tab"] = 3
-                            st.success("¡Hitos actualizados con éxito!")
-                            st.rerun()
-        else:
-            st.warning("⚠️ Solo administradores pueden modificar los hitos del ciclo de pago.")
            
     with tab5:
         st.header("🔥 Embudo de Ventas")
@@ -1028,7 +853,6 @@ if check_password():
 
                 if submitted:
                     if nombre and correo and empresa:
-                        # 1. Guardar en Supabase usando la función que conectamos arriba
                         try:
                             guardar_contacto(nombre, correo, estado, celular)
                             supa_success = True
@@ -1036,7 +860,6 @@ if check_password():
                             st.error(f"Error al guardar en Supabase: {e}")
                             supa_success = False
 
-                        # 2. Guardar en Local (CSV) para actualizar tu gráfico de Embudo
                         nueva = pd.DataFrame([{
                             "Nombre": nombre,
                             "Empresa": empresa,
@@ -1059,7 +882,7 @@ if check_password():
                         st.rerun()
                     else:
                         st.warning("Por favor completa los campos obligatorios (*).")
-        
+      
         st.divider()
 
         st.subheader("📊 Gráfico de Conversión")
