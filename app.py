@@ -67,10 +67,10 @@ def calcular_semaforo_avanzado(row):
     else:
         if row.get('Requiere_GES') == 'Sí' and pd.isna(row.get('Fecha_GES')):
             return 'Naranjo (Pendiente emisión GES)'
-          
+         
         if pd.isna(row.get('Fecha_Vencimiento')):
             return 'Sin Fecha Vencimiento'
-          
+         
         dias_vencido = (hoy - row['Fecha_Vencimiento']).days
         if dias_vencido <= 0:
             return 'Azul/Verde (Al día / Por vencer)'
@@ -257,7 +257,7 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
-    RUTA_MAESTRA = "H:/Ingresos.xlsx" if os.path.exists("H:/Ingresos.xlsx") else "Ingresos.xlsx"
+    RUTA_MAESTRA = os.path.abspath("Ingresos.xlsx")
     ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
@@ -289,7 +289,7 @@ if check_password():
         if st.button("🔄 Sincronizar Excel"):
             st.cache_data.clear()
             registrar_log("Sincronización de Excel realizada")
-            st.success("¡Datos sincronizados desde la unidad H:!")
+            st.success("¡Datos sincronizados desde el archivo Excel local!")
             st.rerun()
        
         if st.button("🚪 Cerrar Sesión"):
@@ -304,7 +304,7 @@ if check_password():
     def cargar_datos():
         df = pd.read_excel(RUTA_MAESTRA)
         df.columns = df.columns.str.strip()
-        
+         
         # --- LIMPIEZA ROBUSTA DE MONTO ---
         if 'Monto' in df.columns:
             if df['Monto'].dtype == object or str(df['Monto'].dtype).startswith('string'):
@@ -319,7 +319,7 @@ if check_password():
         else:
             df['Monto'] = 0.0
         # ---------------------------------
-        
+         
         # Conversión de fechas
         df['Fecha_Cotizacion'] = pd.to_datetime(df.get('Fecha_Cotizacion'), errors='coerce')
         df['Fecha_OC'] = pd.to_datetime(df.get('Fecha_OC'), errors='coerce')
@@ -327,14 +327,14 @@ if check_password():
         df['Fecha_GES'] = pd.to_datetime(df.get('Fecha_GES'), errors='coerce')
         df['Fecha_Pago'] = pd.to_datetime(df.get('Fecha_Pago'), errors='coerce')
         df['Fecha_Vencimiento'] = pd.to_datetime(df.get('Fecha_Vencimiento'), errors='coerce')
-        
+         
         # Sincronización automática del estado según la fecha de pago
         if 'Fecha_Pago' in df.columns:
             if 'Estado' not in df.columns:
                 df['Estado'] = 'PENDIENTE'
             df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
             df.to_excel(RUTA_MAESTRA, index=False)
-        
+         
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
         df['Mes'] = df['Fecha_Pago'].dt.month
 
@@ -342,16 +342,16 @@ if check_password():
         df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
         df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
         df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
-        
+         
         if 'Factura' in df.columns:
             df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
             df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
-            
+             
         return df
    
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
-    
+     
     # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
@@ -450,7 +450,7 @@ if check_password():
                         respuesta_ia = f"🏢 **Análisis Local:** La empresa con mayor aportación de ingresos reales (pagados) durante el 2026 es **{top_empresa}**."
                     else:
                         respuesta_ia = f"🤖 **Respuesta Local (VS Code):** He procesado tu consulta ('{user_query}'). Te sugiero revisar el panel de KPIs ejecutivos y el desglose de ingresos reales por planta."
-                   
+                 
                     st.write("### Respuesta de la IA:")
                     st.write(respuesta_ia)
             else:
@@ -518,7 +518,7 @@ if check_password():
     with tab2:
         container_filtros = st.container()
         with container_filtros:
-            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")        
+            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")      
             c_emp1, c_emp2 = st.columns(2)
             for anio, col in zip([2025, 2026], [c_emp1, c_emp2]):
                 with col:
