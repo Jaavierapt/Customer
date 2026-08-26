@@ -375,39 +375,42 @@ if check_password():
             )
 
         # --- BOTÓN TEMPORAL DE MIGRACIÓN AUTOMÁTICA DESDE EXCEL LOCAL ---
-        if st.button("🚀 Migrar mi Excel local a Supabase"):
-            ruta_local_excel = r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"
-            if os.path.exists(ruta_local_excel):
-                try:
-                    df_local = pd.read_excel(ruta_local_excel)
-                    df_local.columns = df_local.columns.str.strip()
-                    contador_subidas = 0
-                    for _, r in df_local.iterrows():
-                        reg_migrar = {
-                            "Factura": str(r.get("Factura", "")),
-                            "Empresa": str(r.get("Empresa", "")).upper(),
-                            "Planta": str(r.get("Planta", "SIN PLANTA")).upper(),
-                            "Grupo_Servicio": str(r.get("Grupo Servicio", "SIN SERVICIO")).upper(),
-                            "Servicio": str(r.get("Servicio", "SIN DETALLE")).upper(),
-                            "Monto": float(r.get("Monto", 0)) if pd.notna(r.get("Monto")) else 0.0,
-                            "Dias_Programados": float(r.get("Dias_Programados", 0)) if pd.notna(r.get("Dias_Programados")) else 0.0,
-                            "Dias_Reales": float(r.get("Dias_Reales", 0)) if pd.notna(r.get("Dias_Reales")) else 0.0,
-                            "Fecha_Cotizacion": str(r.get("Fecha_Cotizacion")) if pd.notna(r.get("Fecha_Cotizacion")) else None,
-                            "Fecha_OC": str(r.get("Fecha_OC")) if pd.notna(r.get("Fecha_OC")) else None,
-                            "Fecha_Emision": str(r.get("Fecha_Emision")) if pd.notna(r.get("Fecha_Emision")) else None,
-                            "Fecha_Vencimiento": str(r.get("Fecha_Vencimiento")) if pd.notna(r.get("Fecha_Vencimiento")) else None,
-                            "Fecha_GES": str(r.get("Fecha_GES")) if pd.notna(r.get("Fecha_GES")) else None,
-                            "Fecha_Pago": str(r.get("Fecha_Pago")) if pd.notna(r.get("Fecha_Pago")) else None,
-                            "Estado": str(r.get("Estado", "PENDIENTE")),
-                            "Requiere_GES": str(r.get("Requiere_GES", "No"))
-                        }
-                        supabase.table("Facturas").insert(reg_migrar).execute()
-                        contador_subidas += 1
-                    st.cache_data.clear()
-                    st.success(f"¡Se migraron {contador_subidas} registros exitosamente a Supabase!")
-                    st.rerun()
-                except Exception as ex:
-                    st.error(f"Error durante la migración: {ex}")
+        # --- BOTÓN DE MIGRACIÓN CON SUBIDA DE ARCHIVO ---
+        st.write("---")
+        st.write("📂 **Migrar Datos Históricos**")
+        archivo_subido = st.file_uploader("Sube tu archivo Excel (Ingresos.xlsx)", type=["xlsx", "xls"])
+        
+        if archivo_subido is not None and st.button("🚀 Subir registros a Supabase"):
+            try:
+                df_local = pd.read_excel(archivo_subido)
+                df_local.columns = df_local.columns.str.strip()
+                contador_subidas = 0
+                for _, r in df_local.iterrows():
+                    reg_migrar = {
+                        "Factura": str(r.get("Factura", "")),
+                        "Empresa": str(r.get("Empresa", "")).upper(),
+                        "Planta": str(r.get("Planta", "SIN PLANTA")).upper(),
+                        "Grupo_Servicio": str(r.get("Grupo Servicio", "SIN SERVICIO")).upper(),
+                        "Servicio": str(r.get("Servicio", "SIN DETALLE")).upper(),
+                        "Monto": float(r.get("Monto", 0)) if pd.notna(r.get("Monto")) else 0.0,
+                        "Dias_Programados": float(r.get("Dias_Programados", 0)) if pd.notna(r.get("Dias_Programados")) else 0.0,
+                        "Dias_Reales": float(r.get("Dias_Reales", 0)) if pd.notna(r.get("Dias_Reales")) else 0.0,
+                        "Fecha_Cotizacion": str(r.get("Fecha_Cotizacion")) if pd.notna(r.get("Fecha_Cotizacion")) else None,
+                        "Fecha_OC": str(r.get("Fecha_OC")) if pd.notna(r.get("Fecha_OC")) else None,
+                        "Fecha_Emision": str(r.get("Fecha_Emision")) if pd.notna(r.get("Fecha_Emision")) else None,
+                        "Fecha_Vencimiento": str(r.get("Fecha_Vencimiento")) if pd.notna(r.get("Fecha_Vencimiento")) else None,
+                        "Fecha_GES": str(r.get("Fecha_GES")) if pd.notna(r.get("Fecha_GES")) else None,
+                        "Fecha_Pago": str(r.get("Fecha_Pago")) if pd.notna(r.get("Fecha_Pago")) else None,
+                        "Estado": str(r.get("Estado", "PENDIENTE")),
+                        "Requiere_GES": str(r.get("Requiere_GES", "No"))
+                    }
+                    supabase.table("Facturas").insert(reg_migrar).execute()
+                    contador_subidas += 1
+                st.cache_data.clear()
+                st.success(f"¡Se migraron {contador_subidas} registros exitosamente a Supabase!")
+                st.rerun()
+            except Exception as ex:
+                st.error(f"Error durante la migración: {ex}")
             else:
                 st.warning("No se encontró el archivo Excel local en la ruta especificada de tu PC.")
 
