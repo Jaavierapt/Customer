@@ -257,7 +257,11 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
-    RUTA_MAESTRA = r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"
+    if os.path.exists(r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"):
+        RUTA_MAESTRA = r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"
+    else:
+        RUTA_MAESTRA = "Ingresos.xlsx"
+        
     ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
