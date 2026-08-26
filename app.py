@@ -846,13 +846,63 @@ if check_password():
         st.divider()
            
     with tab5:
-        st.header("🔥 Embudo de Ventas")
+        st.header("🔥 Embudo de Ventas y Métricas Comerciales")
 
         if 'Bitacora' not in df_contactos.columns:
             df_contactos['Bitacora'] = ""
 
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
        
+        # =====================================================================
+        # PANEL DE NUEVOS KPIS COMERCIALES
+        # =====================================================================
+        st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
+        
+        # 1. Tasa de Conversión (Ganados / Total no perdidos o total histórico)
+        total_contactos = len(df_contactos)
+        total_ganados = len(df_contactos[df_contactos['Estado'] == 'Ganado']) if total_contactos > 0 else 0
+        tasa_conversion = (total_ganados / total_contactos * 100) if total_contactos > 0 else 0
+        
+        # 2. Tasa de Retención y Recurrencia (Clientes con más de 1 servicio/factura registrada)
+        if not df.empty and 'Empresa' in df.columns:
+            conteo_por_empresa = df['Empresa'].value_counts()
+            clientes_recurrentes = len(conteo_por_empresa[conteo_por_empresa > 1])
+            total_empresas = len(conteo_por_empresa)
+            tasa_retencion = (clientes_recurrentes / total_empresas * 100) if total_empresas > 0 else 0
+            pct_clientes_rec = tasa_retencion
+            
+            conteo_servicios = df['Servicio'].value_counts() if 'Servicio' in df.columns else pd.Series(dtype=int)
+            servicios_recurrentes = len(conteo_servicios[conteo_servicios > 1])
+            total_servicios_unicos = len(conteo_servicios)
+            pct_servicios_rec = (servicios_recurrentes / total_servicios_unicos * 100) if total_servicios_unicos > 0 else 0
+        else:
+            tasa_retencion = 0.0
+            pct_clientes_rec = 0.0
+            pct_servicios_rec = 0.0
+
+        # 3. Tiempo de Conversión (Días promedio desde que se crea/contacta hasta pasar a Ganado, estimado con interacción o fecha de pago)
+        # 4. Tiempo de Respuesta (Promedio de días entre interacciones en el historial)
+        promedio_dias_respuesta = 0.0
+        if not df_interacciones.empty:
+            try:
+                temp_int = df_interacciones.copy()
+                temp_int['Fecha_DT'] = pd.to_datetime(temp_int['Fecha'], errors='coerce')
+                temp_int = temp_int.sort_values(by=['Nombre_Contacto', 'Fecha_DT'])
+                diferencias_resp = temp_int.groupby('Nombre_Contacto')['Fecha_DT'].diff().dt.days.dropna()
+                if not diferencias_resp.empty:
+                    promedio_dias_respuesta = diferencias_resp.mean()
+            except:
+                promedio_dias_respuesta = 0.0
+
+        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+        kpi1.metric("Tasa de Conversión", f"{tasa_conversion:.1f}%")
+        kpi2.metric("Tasa de Retención", f"{tasa_retencion:.1f}%")
+        kpi3.metric("Clientes Recurrentes", f"{pct_clientes_rec:.1f}%")
+        kpi4.metric("Servicios Recurrentes", f"{pct_servicios_rec:.1f}%")
+        kpi5.metric("Tiempo de Respuesta", f"{promedio_dias_respuesta:.1f} días")
+
+        st.divider()
+
         # =====================================================================
         # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
         # =====================================================================
