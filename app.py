@@ -251,7 +251,7 @@ def generar_pdf(df_original):
             if 'Grupo Servicio' in df_anio.columns:
                 agregar_grafico_servicio_por_anio(pdf, df_anio, anio)
 
-    return pdf.output(dest='S').encode('latin-1')
+    return bytes(pdf.output())
 
 # =============================================================================
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
