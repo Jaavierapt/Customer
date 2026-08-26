@@ -746,7 +746,10 @@ if check_password():
                         }])
                         df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
                         df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                        
+                        # LIMPIEZA CRÍTICA DE CACHÉ PARA EVITAR DUPLICADOS Y REFRESCAR EL EXCEL
                         st.cache_data.clear()
+                        
                         st.success("¡Factura creada y guardada con éxito en el Excel!")
                         st.rerun()
                     else:
