@@ -610,7 +610,7 @@ if check_password():
             st.plotly_chart(fig_estacional, use_container_width=True)
 
         with tab3:
-        st.subheader("📊 Análisis de Servicios Pagados por Empresa")
+            st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
         if 'Grupo Service' in df.columns:
             col_serv = 'Grupo Service'
