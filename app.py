@@ -694,32 +694,37 @@ if check_password():
                     n_factura = st.text_input("Número de Factura / Documento")
                     n_empresa_ins = st.text_input("Empresa")
                     n_planta_ins = st.text_input("Planta")
-                     
+                    
                     servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
                     n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
-                     
+                    
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
-                     
+                    
                     n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
+                    
+                    # Nuevos campos de ejecución
+                    n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
+                    n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
+
                 with fc2:
                     n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
                     if n_estado_pago == "Pagado":
                         n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
                     else:
                         n_f_pago = st.date_input("Fecha de Pago", value=None)
-                         
+                        
                     n_f_cot = st.date_input("Fecha Cotización", value=None)
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
                     n_f_emi = st.date_input("Fecha Emisión", value=None)
                     n_f_venc = st.date_input("Fecha Vencimiento", value=None)
-                     
+                    
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
-               
+                
                 if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                       
+                        
                         nueva_fila = pd.DataFrame([{
                             "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
@@ -727,6 +732,8 @@ if check_password():
                             "Grupo Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
                             "Monto": n_monto,
+                            "Dias_Programados": n_dias_prog,
+                            "Dias_Reales": n_dias_real,
                             "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
                             "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
                             "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
@@ -756,40 +763,52 @@ if check_password():
         # ÚNICO HISTORIAL GENERAL Y MENÚ DESPLEGABLE DE DETALLE
         # =====================================================================
         st.subheader("📊 Historial General de Facturas")
-          
+        
         df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
-          
+        
         if not df.empty:
             # 1. Menú desplegable preliminar para elegir la factura y ver su detalle completo
             st.write("### 🔍 Detalle Extendido por Factura")
             lista_facturas = df['Factura'].astype(str).tolist() if 'Factura' in df.columns else []
             if lista_facturas:
                 factura_seleccionada = st.selectbox("Selecciona una factura del historial para ver su información detallada:", lista_facturas)
-                 
+                
                 # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
-                 
+                
+                # Cálculo de KPIs de eficiencia y cobro para el detalle
+                d_prog = row_det.get('Dias_Programados', 0)
+                d_real = row_det.get('Dias_Reales', 0)
+                desviacion = d_real - d_prog
+                
+                f_emi_val = row_det.get('Fecha_Emision')
+                f_pago_val = row_det.get('Fecha_Pago')
+                dias_cobro = (pd.to_datetime(f_pago_val) - pd.to_datetime(f_emi_val)).days if pd.notna(f_emi_val) and pd.notna(f_pago_val) else "N/A"
+
                 # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
-                     
+                    
                     with dc1:
                         st.markdown(f"**Empresa:** {row_det.get('Empresa', 'N/A')}")
                         st.markdown(f"**Planta:** {row_det.get('Planta', 'N/A')}")
                         st.markdown(f"**Grupo de Servicio:** {row_det.get('Grupo Servicio', 'N/A')}")
                         st.markdown(f"**Servicio Entregado:** {row_det.get('Servicio', 'N/A')}")
                         st.markdown(f"**Monto:** ${row_det.get('Monto', 0):,.0f}")
-                         
+                        st.markdown(f"**Días Programados:** {d_prog}")
+                        st.markdown(f"**Días Reales:** {d_real}")
+                        st.markdown(f"**Desviación de Ejecución:** {desviacion:+g} días")
+                        
                     with dc2:
                         st.markdown(f"**Fecha Cotización:** {str(row_det.get('Fecha_Cotizacion', 'N/A')).split(' ')[0]}")
                         st.markdown(f"**Fecha Orden de Compra (OC):** {str(row_det.get('Fecha_OC', 'N/A')).split(' ')[0]}")
                         st.markdown(f"**Fecha Emisión:** {str(row_det.get('Fecha_Emision', 'N/A')).split(' ')[0]}")
                         st.markdown(f"**Fecha de Vencimiento:** {str(row_det.get('Fecha_Vencimiento', 'N/A')).split(' ')[0]}")
-                         
+                        
                     with dc3:
-                        f_pago_val = row_det.get('Fecha_Pago')
                         f_pago_str = str(f_pago_val).split(' ')[0] if pd.notna(f_pago_val) else "Pendiente de pago"
                         st.markdown(f"**Fecha de Pago:** {f_pago_str}")
+                        st.markdown(f"**Días en Cobrar (desde Emisión):** {dias_cobro}")
                         st.markdown(f"**Semáforo:** {row_det.get('Semáforo', 'N/A')}")
                         st.markdown(f"**¿Requiere GES?:** {row_det.get('Requiere_GES', 'No')}")
                         f_ges_val = row_det.get('Fecha_GES')
@@ -801,7 +820,7 @@ if check_password():
             # 2. Tabla general limpia y simplificada (Número, Empresa, Planta, Monto, Estado)
             st.write("### 📋 Listado General Preliminar")
             columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
-              
+            
             configuracion_columnas = {
                 "Estado": st.column_config.SelectboxColumn(
                     "Estado del Servicio/Cobro",
@@ -827,13 +846,63 @@ if check_password():
         st.divider()
            
     with tab5:
-        st.header("🔥 Embudo de Ventas")
+        st.header("🔥 Embudo de Ventas y Métricas Comerciales")
 
         if 'Bitacora' not in df_contactos.columns:
             df_contactos['Bitacora'] = ""
 
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
        
+        # =====================================================================
+        # PANEL DE NUEVOS KPIS COMERCIALES
+        # =====================================================================
+        st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
+        
+        # 1. Tasa de Conversión (Ganados / Total no perdidos o total histórico)
+        total_contactos = len(df_contactos)
+        total_ganados = len(df_contactos[df_contactos['Estado'] == 'Ganado']) if total_contactos > 0 else 0
+        tasa_conversion = (total_ganados / total_contactos * 100) if total_contactos > 0 else 0
+        
+        # 2. Tasa de Retención y Recurrencia (Clientes con más de 1 servicio/factura registrada)
+        if not df.empty and 'Empresa' in df.columns:
+            conteo_por_empresa = df['Empresa'].value_counts()
+            clientes_recurrentes = len(conteo_por_empresa[conteo_por_empresa > 1])
+            total_empresas = len(conteo_por_empresa)
+            tasa_retencion = (clientes_recurrentes / total_empresas * 100) if total_empresas > 0 else 0
+            pct_clientes_rec = tasa_retencion
+            
+            conteo_servicios = df['Servicio'].value_counts() if 'Servicio' in df.columns else pd.Series(dtype=int)
+            servicios_recurrentes = len(conteo_servicios[conteo_servicios > 1])
+            total_servicios_unicos = len(conteo_servicios)
+            pct_servicios_rec = (servicios_recurrentes / total_servicios_unicos * 100) if total_servicios_unicos > 0 else 0
+        else:
+            tasa_retencion = 0.0
+            pct_clientes_rec = 0.0
+            pct_servicios_rec = 0.0
+
+        # 3. Tiempo de Conversión (Días promedio desde que se crea/contacta hasta pasar a Ganado, estimado con interacción o fecha de pago)
+        # 4. Tiempo de Respuesta (Promedio de días entre interacciones en el historial)
+        promedio_dias_respuesta = 0.0
+        if not df_interacciones.empty:
+            try:
+                temp_int = df_interacciones.copy()
+                temp_int['Fecha_DT'] = pd.to_datetime(temp_int['Fecha'], errors='coerce')
+                temp_int = temp_int.sort_values(by=['Nombre_Contacto', 'Fecha_DT'])
+                diferencias_resp = temp_int.groupby('Nombre_Contacto')['Fecha_DT'].diff().dt.days.dropna()
+                if not diferencias_resp.empty:
+                    promedio_dias_respuesta = diferencias_resp.mean()
+            except:
+                promedio_dias_respuesta = 0.0
+
+        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+        kpi1.metric("Tasa de Conversión", f"{tasa_conversion:.1f}%")
+        kpi2.metric("Tasa de Retención", f"{tasa_retencion:.1f}%")
+        kpi3.metric("Clientes Recurrentes", f"{pct_clientes_rec:.1f}%")
+        kpi4.metric("Servicios Recurrentes", f"{pct_servicios_rec:.1f}%")
+        kpi5.metric("Tiempo de Respuesta", f"{promedio_dias_respuesta:.1f} días")
+
+        st.divider()
+
         # =====================================================================
         # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
         # =====================================================================
@@ -872,12 +941,12 @@ if check_password():
                             "Rol_Contacto": rol
                         }])
                         pd.concat([df_contactos, nueva], ignore_index=True).to_csv(ARCHIVO_CONTACTOS, index=False)
-                         
+                        
                         if supa_success:
                             st.success(f"¡Cliente {nombre} registrado exitosamente en Supabase y Embudo Local!")
                         else:
                             st.warning(f"¡Cliente {nombre} guardado en tu sistema local, pero hubo un error de conexión con Supabase!")
-                         
+                            
                         st.session_state["active_tab"] = 4
                         st.rerun()
                     else:
@@ -937,7 +1006,7 @@ if check_password():
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
                         nota_actual = ""
-                         
+                       
                     with st.expander(f"📝 Bitácora ({row['Nombre']})"):
                         nueva_nota = st.text_area(
                             "Resumen de llamada/reunión:",
