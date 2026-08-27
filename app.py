@@ -609,16 +609,23 @@ if check_password():
             )
             st.plotly_chart(fig_estacional, use_container_width=True)
 
-    with tab3:
+    
+        with tab3:
         st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
-        col_servicio = 'Grupo Servicio' if 'Grupo Servicio' in df.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df.columns else None)
-        if col_servicio and col_servicio in df.columns:
-            df_analisis = df.groupby(['Empresa', col_servicio])['Monto'].sum().reset_index()
-            df_analisis = df_analisis.rename(columns={col_servicio: 'Grupo Servicio'})
+        if 'Grupo Service' in df.columns:
+            col_serv = 'Grupo Service'
+        elif 'Grupo_Servicio' in df.columns:
+            col_serv = 'Grupo_Servicio'
+        elif 'Grupo Servicio' in df.columns:
+            col_serv = 'Grupo Servicio'
         else:
             df['Grupo Servicio'] = 'SIN SERVICIO'
-            df_analisis = df.groupby(['Empresa', 'Grupo Servicio'])['Monto'].sum().reset_index()
+            col_serv = 'Grupo Servicio'
+
+        df_analisis = df.groupby(['Empresa', col_serv])['Monto'].sum().reset_index()
+        if col_serv != 'Grupo Servicio':
+            df_analisis = df_analisis.rename(columns={col_serv: 'Grupo Servicio'})
        
         fig_bar = px.bar(
             df_analisis,
@@ -635,7 +642,7 @@ if check_password():
         st.subheader("📊 Análisis de Ventas Cruzadas (2026)")
         df_2026 = df[df['Año'] == 2026]
         st.write("### Identificación de Venta Cruzada")
-        servicios_disponibles = df['Grupo Servicio'].unique()
+        servicios_disponibles = df['Grupo Servicio'].unique() if 'Grupo Servicio' in df.columns else ["SIN SERVICIO"]
         servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles)
              
         clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique()
