@@ -639,12 +639,21 @@ if check_password():
         st.info("💡 Tip: Analiza qué servicios generan mayor flujo de caja real por cliente.")
 
         st.subheader("📊 Análisis de Ventas Cruzadas (2026)")
-        df_2026 = df[df['Año'] == 2026]
+        df_2026 = df[df['Año'] == 2026].copy()
+        
+        # Asegurar que la columna de servicios exista en df_2026
+        col_serv_2026 = 'Grupo Servicio' if 'Grupo Servicio' in df_2026.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df_2026.columns else None)
+        if not col_serv_2026:
+            df_2026['Grupo Servicio'] = 'SIN SERVICIO'
+            col_serv_2026 = 'Grupo Servicio'
+        elif col_serv_2026 != 'Grupo Servicio':
+            df_2026['Grupo Servicio'] = df_2026[col_serv_2026]
+
         st.write("### Identificación de Venta Cruzada")
-        servicios_disponibles = df['Grupo Servicio'].unique() if 'Grupo Servicio' in df.columns else ["SIN SERVICIO"]
-        servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles)
+        servicios_disponibles = df_2026['Grupo Servicio'].unique() if not df_2026.empty else ["SIN SERVICIO"]
+        servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles, key="select_servicio_target_cruzada")
              
-        clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique()
+        clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique() if not df_2026.empty else []
         todos_los_clientes = df_2026['Empresa'].unique()
              
         clientes_potenciales = [c for c in todos_los_clientes if c not in clientes_con_servicio]
