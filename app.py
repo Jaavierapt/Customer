@@ -124,34 +124,32 @@ def generar_pdf(df_original):
     pdf.add_page()
    
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt="Reporte Ejecutivo CRM Itelcam (Ingresos Reales por Pago en miles $CL)", ln=True, align='C')
+    pdf.cell(200, 10, txt="Reporte Ejecutivo CRM Itelcam (Ingresos Reales por Pago)", ln=True, align='C')
     pdf.ln(5)
    
-    ingresos_totales = df['Monto'].sum() / 1000
+    ingresos_totales = df['Monto'].sum()
     total_clientes = df['Empresa'].nunique() if 'Empresa' in df.columns else len(df)
-    ingresos_2025 = df[df['Año'] == 2025]['Monto'].sum() / 1000 if 'Año' in df.columns else 0
-    ingresos_2026 = df[df['Año'] == 2026]['Monto'].sum() / 1000 if 'Año' in df.columns else 0
+    ingresos_2025 = df[df['Año'] == 2025]['Monto'].sum() if 'Año' in df.columns else 0
+    ingresos_2026 = df[df['Año'] == 2026]['Monto'].sum() if 'Año' in df.columns else 0
 
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.2f}k $CL", ln=True)
+    pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}", ln=True)
     pdf.cell(200, 6, txt=f"Total Clientes: {total_clientes}", ln=True)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f}k $CL | 2026: ${ingresos_2026:,.0f}k $CL", ln=True)
+    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}", ln=True)
     pdf.ln(5)
 
     if 'Mes' in df.columns and 'Año' in df.columns:
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 8, txt="Comparativa Ingresos Reales 2025 vs 2026 (miles $CL)", ln=True)
+        pdf.cell(200, 8, txt="Comparativa Ingresos Reales 2025 vs 2026", ln=True)
        
         plt.figure(figsize=(7, 3.8))
-        df_temp_pdf = df.copy()
-        df_temp_pdf['Monto'] = df_temp_pdf['Monto'] / 1000
-        pivot_df = df_temp_pdf.pivot_table(index='Mes', columns='Año', values='Monto', aggfunc='sum').fillna(0)
+        pivot_df = df.pivot_table(index='Mes', columns='Año', values='Monto', aggfunc='sum').fillna(0)
         pivot_df.plot(kind='bar', figsize=(7, 3.5), width=0.8)
        
-        plt.title("Comparativa Ingresos Reales (Fecha de Pago) 2025 vs 2026 (miles $CL)", fontsize=10)
+        plt.title("Comparativa Ingresos Reales (Fecha de Pago) 2025 vs 2026", fontsize=10)
         plt.xlabel("Mes", fontsize=9)
-        plt.ylabel("Monto Pagado (miles $CL)", fontsize=9)
+        plt.ylabel("Monto Pagado", fontsize=9)
         plt.xticks(rotation=0)
         plt.legend(title="Año")
         plt.tight_layout()
@@ -168,14 +166,12 @@ def generar_pdf(df_original):
     def agregar_grafico_empresa_por_anio(pdf, df_anio, anio):
         if df_anio.empty:
             return
-        empresa_data = df_anio.groupby('Empresa', as_index=False)['Monto'].sum()
-        empresa_data['Monto'] = empresa_data['Monto'] / 1000
-        empresa_data = empresa_data.sort_values(by='Monto', ascending=True)
+        empresa_data = df_anio.groupby('Empresa', as_index=False)['Monto'].sum().sort_values(by='Monto', ascending=True)
        
         plt.figure(figsize=(6, 3.2))
         plt.barh(empresa_data['Empresa'], empresa_data['Monto'], color='skyblue')
-        plt.title(f"Ingresos Reales por Empresa ({anio}) (miles $CL)", fontsize=10)
-        plt.xlabel("Monto Pagado (miles $CL)", fontsize=9)
+        plt.title(f"Ingresos Reales por Empresa ({anio})", fontsize=10)
+        plt.xlabel("Monto Pagado ($)", fontsize=9)
         plt.ylabel("Empresa", fontsize=9)
         plt.tight_layout()
        
@@ -185,7 +181,7 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Año {anio} (miles $CL)", ln=True)
+        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Año {anio}", ln=True)
         pdf.image(tmp_path, x=25, w=150)
         os.remove(tmp_path)
         pdf.ln(2)
@@ -194,7 +190,7 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Empresas ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in empresa_data.iterrows():
-            pdf.cell(90, 5, f"{row['Empresa']}: ${row['Monto']:,.0f}k $CL", border=1)
+            pdf.cell(90, 5, f"{row['Empresa']}: ${row['Monto']:,.0f}", border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -202,7 +198,6 @@ def generar_pdf(df_original):
         if df_anio.empty:
             return
         servicio_data = df_anio.groupby('Grupo Servicio', as_index=False)['Monto'].sum()
-        servicio_data['Monto'] = servicio_data['Monto'] / 1000
        
         total_monto = servicio_data['Monto'].sum()
         if total_monto > 0:
@@ -220,7 +215,7 @@ def generar_pdf(df_original):
             startangle=140
         )
         plt.legend(wedges, etiquetas_leyenda, title="Servicios", loc="center left", bbox_to_anchor=(1, 0.5), fontsize=8)
-        plt.title(f"Mix de Servicios Reales ({anio}) (miles $CL)", fontsize=10)
+        plt.title(f"Mix de Servicios Reales ({anio})", fontsize=10)
         plt.tight_layout()
        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
@@ -229,7 +224,7 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Año {anio} (miles $CL)", ln=True)
+        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Año {anio}", ln=True)
         pdf.image(tmp_path, x=20, w=160)
         os.remove(tmp_path)
         pdf.ln(2)
@@ -238,7 +233,7 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Mix de Servicios ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in servicio_data.iterrows():
-            pdf.cell(90, 5, f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}k $CL", border=1)
+            pdf.cell(90, 5, f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}", border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -302,7 +297,7 @@ if check_password():
             st.rerun()
 
     # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
-    st.title("🚀 Itelcam CRM - Gestión Estratégica (Montos en miles $CL)")
+    st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
     # --- CARGA DE DATOS LOCALES EXCEL / CSV ---
     @st.cache_data
@@ -324,9 +319,6 @@ if check_password():
         else:
             df['Monto'] = 0.0
         # ---------------------------------
-        
-        # CONVERTIR TODOS LOS MONTOS A MILES $CL
-        df['Monto'] = df['Monto'] / 1000
          
         # Conversión de fechas
         df['Fecha_Cotizacion'] = pd.to_datetime(df.get('Fecha_Cotizacion'), errors='coerce')
@@ -363,9 +355,6 @@ if check_password():
     # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
-    if 'Valor' in df_contactos.columns:
-        df_contactos['Valor'] = pd.to_numeric(df_contactos['Valor'], errors='coerce').fillna(0.0) / 1000
-
     if 'Rol_Contacto' not in df_contactos.columns:
         df_contactos['Rol_Contacto'] = 'Influenciador'
         df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
@@ -375,7 +364,7 @@ if check_password():
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🏢 Gestión por Planta", "📈 Análisis Estratégico", "➕ Gestión de Facturas y Ciclo de Pago", "🔥 Embudo Ventas"])
    
     with tab1:
-        st.info("💡 **Nota Financiera:** Todos los ingresos, gráficos y métricas mostrados a continuación reflejan exclusivamente los montos correspondientes a su **fecha de pago efectiva** (expresados en miles $CL).")
+        st.info("💡 **Nota Financiera:** Todos los ingresos, gráficos y métricas mostrados a continuación reflejan exclusivamente los montos correspondientes a su **fecha de pago efectiva**.")
           
         st.subheader("🔔 Alertas de Renovación y Vencimientos Anuales")
         if 'Fecha_Vencimiento' in df.columns:
@@ -455,7 +444,7 @@ if check_password():
                     if "ingresos" in query_lower or "total" in query_lower or "cuánto" in query_lower:
                         total_2026_val = df[df['Año'] == 2026]['Monto'].sum()
                         total_2025_val = df[df['Año'] == 2025]['Monto'].sum()
-                        respuesta_ia = f"📊 **Análisis Local (Por Fecha de Pago):** Los ingresos reales pagados durante el año 2026 ascienden a ${total_2026_val:,.1f}k $CL, comparados con ${total_2025_val:,.1f}k $CL en 2025."
+                        respuesta_ia = f"📊 **Análisis Local (Por Fecha de Pago):** Los ingresos reales pagados durante el año 2026 ascienden a ${total_2026_val:,.0f}, comparados con ${total_2025_val:,.0f} en 2025."
                     elif "cliente" in query_lower or "empresa" in query_lower:
                         top_empresa = df[df['Año'] == 2026].groupby('Empresa')['Monto'].sum().idxmax() if not df[df['Año'] == 2026].empty else "N/A"
                         respuesta_ia = f"🏢 **Análisis Local:** La empresa con mayor aportación de ingresos reales (pagados) durante el 2026 es **{top_empresa}**."
@@ -467,7 +456,7 @@ if check_password():
             else:
                 st.warning("Por favor, escribe una pregunta.")
 
-        st.subheader("📊 Resumen Ejecutivo de Ingresos Reales (KPIs en miles $CL)")
+        st.subheader("📊 Resumen Ejecutivo de Ingresos Reales (KPIs)")
         total_2026 = df[df['Año'] == 2026]['Monto'].sum()
         total_2025 = df[df['Año'] == 2025]['Monto'].sum()
         variacion = ((total_2026 - total_2025) / total_2025 * 100) if total_2025 != 0 else 0
@@ -475,15 +464,15 @@ if check_password():
         top_cliente = df[df['Año'] == 2026].groupby('Empresa')['Monto'].sum().idxmax() if not df[df['Año'] == 2026].empty else "N/A"
           
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Ingresos Pagados 2026", f"${total_2026:,.1f}k $CL")
+        k1.metric("Ingresos Pagados 2026", f"${total_2026:,.0f}")
         k2.metric("Crecimiento vs 2025", f"{variacion:,.1f}%", delta=f"{variacion:,.1f}%")
-        k3.metric("Ticket Promedio Pagado", f"${ticket_promedio:,.1f}k $CL")
+        k3.metric("Ticket Promedio Pagado", f"${ticket_promedio:,.0f}")
         k4.metric("Top Cliente Pagado 2026", top_cliente)    
         st.divider()
           
-        st.subheader("Ingresos Reales Totales: Comparativa 2025 vs 2026 (Por Fecha de Pago en miles $CL)")
+        st.subheader("Ingresos Reales Totales: Comparativa 2025 vs 2026 (Por Fecha de Pago)")
         tendencia = df[df['Año'].isin([2025, 2026])].groupby(['Año', 'Mes'])['Monto'].sum().reset_index()
-        fig_line = px.line(tendencia, x='Mes', y='Monto', color='Año', markers=True, labels={'Monto': 'Monto Pagado (miles $CL)'})
+        fig_line = px.line(tendencia, x='Mes', y='Monto', color='Año', markers=True, labels={'Monto': 'Monto Pagado ($)'})
         st.plotly_chart(fig_line, use_container_width=True)
           
         st.subheader("Mix de Servicios Reales Comparativo")
@@ -513,8 +502,8 @@ if check_password():
                     st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
                     df_churn_display['Variacion_%'] = df_churn_display['Variacion_%'].map(lambda x: f"{x:.1f}%")
-                    df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${x:,.1f}k $CL")
-                    df_churn_display['Monto_2026'] = df_churn_display['Monto_2026'].map(lambda x: f"${x:,.1f}k $CL")
+                    df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${x:,.0f}")
+                    df_churn_display['Monto_2026'] = df_churn_display['Monto_2026'].map(lambda x: f"${x:,.0f}")
                     df_churn_display.columns = ['Empresa', 'Mes', 'Pagado 2025', 'Pagado 2026', 'Variación (%)']
                     st.dataframe(df_churn_display, hide_index=True, use_container_width=True)
                 else:
@@ -529,7 +518,7 @@ if check_password():
     with tab2:
         container_filtros = st.container()
         with container_filtros:
-            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta (miles $CL)")      
+            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")      
             c_emp1, c_emp2 = st.columns(2)
             for anio, col in zip([2025, 2026], [c_emp1, c_emp2]):
                 with col:
@@ -556,7 +545,7 @@ if check_password():
                     else:
                         st.write(f"Sin pagos en {anio}")
             st.divider()
-            st.subheader(f"📈 Estacionalidad Mensual de Pagos por Planta: {planta_sel} ({empresa_sel}) (miles $CL)")
+            st.subheader(f"📈 Estacionalidad Mensual de Pagos por Planta: {planta_sel} ({empresa_sel})")
            
             df_planta_estacional = df[(df['Empresa'] == empresa_sel) & (df['Planta'] == planta_sel) & df['Año'].isin([2025, 2026])]
            
@@ -570,7 +559,7 @@ if check_password():
                     color='Año',
                     markers=True,
                     title=f"Comparativa Estacional de Pagos (2025 vs 2026) - {planta_sel}",
-                    labels={'Monto': 'Monto Pagado (miles $CL)', 'Mes': 'Mes'},
+                    labels={'Monto': 'Monto Pagado ($)', 'Mes': 'Mes'},
                     category_orders={"Mes": list(range(1, 13))}
                 )
                 st.plotly_chart(fig_estacional_planta, use_container_width=True)
@@ -588,13 +577,13 @@ if check_password():
                 color='Año',
                 markers=True,
                 title=f"Tendencia Mensual de Pagos 2025 vs 2026",
-                labels={'Monto': 'Ingresos Pagados (miles $CL)', 'Mes': 'Mes'},
+                labels={'Monto': 'Ingresos Pagados ($)', 'Mes': 'Mes'},
                 category_orders={"Mes": list(range(1, 13))}
             )
             st.plotly_chart(fig_estacional, use_container_width=True)
 
     with tab3:
-        st.subheader("📊 Análisis de Servicios Pagados por Empresa (miles $CL)")
+        st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
         df_analisis = df.groupby(['Empresa', 'Grupo Servicio'])['Monto'].sum().reset_index()
        
@@ -605,7 +594,7 @@ if check_password():
             color="Grupo Servicio",
             title="Distribución de Servicios según Ingresos Reales",
             barmode="stack",
-            labels={'Monto': 'Monto Pagado (miles $CL)'}
+            labels={'Monto': 'Monto Pagado ($)'}
         )
         st.plotly_chart(fig_bar, use_container_width=True)
         st.info("💡 Tip: Analiza qué servicios generan mayor flujo de caja real por cliente.")
@@ -630,7 +619,7 @@ if check_password():
 
         st.divider()
 
-        st.subheader("🏆 Clasificación de Clientes (Por Facturación Real Pagada en miles $CL)")
+        st.subheader("🏆 Clasificación de Clientes (Por Facturación Real Pagada)")
         if not df.empty:
             df_abc = df.groupby('Empresa')['Monto'].sum().reset_index()
             df_abc = df_abc.sort_values(by='Monto', ascending=False)
@@ -696,7 +685,7 @@ if check_password():
             st.warning("No hay datos suficientes de pagos del año 2026 para ejecutar el Gap Analysis.")
 
     with tab4:
-        st.header("➕ Gestión de Facturas y Ciclo de Pago (en miles $CL)")
+        st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
             with st.form("form_nueva_factura"):
@@ -711,7 +700,7 @@ if check_password():
                      
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
                      
-                    n_monto = st.number_input("Monto (en miles $CL)", min_value=0.0, step=1.0)
+                    n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
                      
                     # Nuevos campos de ejecución
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
@@ -735,7 +724,7 @@ if check_password():
                 if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                       
+                         
                         nueva_fila = pd.DataFrame([{
                             "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
@@ -805,7 +794,7 @@ if check_password():
                         st.markdown(f"**Planta:** {row_det.get('Planta', 'N/A')}")
                         st.markdown(f"**Grupo de Servicio:** {row_det.get('Grupo Servicio', 'N/A')}")
                         st.markdown(f"**Servicio Entregado:** {row_det.get('Servicio', 'N/A')}")
-                        st.markdown(f"**Monto:** ${row_det.get('Monto', 0):,.1f}k $CL")
+                        st.markdown(f"**Monto:** ${row_det.get('Monto', 0):,.0f}")
                         st.markdown(f"**Días Programados:** {d_prog}")
                         st.markdown(f"**Días Reales:** {d_real}")
                         st.markdown(f"**Desviación de Ejecución:** {desviacion:+g} días")
@@ -831,7 +820,7 @@ if check_password():
             # 2. Tabla general limpia y simplificada (Número, Empresa, Planta, Monto, Estado)
             st.write("### 📋 Listado General Preliminar")
             columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
-              
+             
             configuracion_columnas = {
                 "Estado": st.column_config.SelectboxColumn(
                     "Estado del Servicio/Cobro",
@@ -869,10 +858,12 @@ if check_password():
         # =====================================================================
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
           
+        # 1. Tasa de Conversión (Ganados / Total no perdidos o total histórico)
         total_contactos = len(df_contactos)
         total_ganados = len(df_contactos[df_contactos['Estado'] == 'Ganado']) if total_contactos > 0 else 0
         tasa_conversion = (total_ganados / total_contactos * 100) if total_contactos > 0 else 0
           
+        # 2. Tasa de Retención y Recurrencia (Clientes con más de 1 servicio/factura registrada)
         if not df.empty and 'Empresa' in df.columns:
             conteo_por_empresa = df['Empresa'].value_counts()
             clientes_recurrentes = len(conteo_por_empresa[conteo_por_empresa > 1])
@@ -889,6 +880,8 @@ if check_password():
             pct_clientes_rec = 0.0
             pct_servicios_rec = 0.0
 
+        # 3. Tiempo de Conversión (Días promedio desde que se crea/contacta hasta pasar a Ganado, estimado con interacción o fecha de pago)
+        # 4. Tiempo de Respuesta (Promedio de días entre interacciones en el historial)
         promedio_dias_respuesta = 0.0
         if not df_interacciones.empty:
             try:
@@ -923,7 +916,7 @@ if check_password():
                 celular = c1.text_input("Celular")
                 estado = c2.selectbox("Estado del Cliente", estados)
                 rol = c1.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"])
-                valor = c2.number_input("Valor (en miles $CL)", min_value=0.0, step=1.0)
+                valor = c2.number_input("Valor", min_value=0.0, step=1000.0)
 
                 submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
 
@@ -953,7 +946,7 @@ if check_password():
                             st.success(f"¡Cliente {nombre} registrado exitosamente en Supabase y Embudo Local!")
                         else:
                             st.warning(f"¡Cliente {nombre} guardado en tu sistema local, pero hubo un error de conexión con Supabase!")
-                         
+                             
                         st.session_state["active_tab"] = 4
                         st.rerun()
                     else:
@@ -984,7 +977,7 @@ if check_password():
                     st.write(f"*{row['Nombre']}*")
                     st.write(f"Empresa: {row['Empresa']}")
                     st.write(f"Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
-                    st.write(f"Valor: ${row['Valor']:,.1f}k $CL")
+                    st.write(f"Valor: ${row['Valor']}")
                    
                     correo_contacto = row.get('Correo', '')
                     nombre_contacto = row.get('Nombre', 'Cliente')
@@ -1013,7 +1006,7 @@ if check_password():
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
                         nota_actual = ""
-                         
+                       
                     with st.expander(f"📝 Bitácora ({row['Nombre']})"):
                         nueva_nota = st.text_area(
                             "Resumen de llamada/reunión:",
@@ -1096,13 +1089,13 @@ if check_password():
             score_velocidad = 0
            
             valor = row.get('Valor', 0)
-            if valor >= 3000:
+            if valor >= 3000000:
                 score_valor = 50
-            elif valor >= 1500:
+            elif valor >= 1500000:
                 score_valor = 40
-            elif valor >= 800:
+            elif valor >= 800000:
                 score_valor = 30
-            elif valor >= 400:
+            elif valor >= 400000:
                 score_valor = 15
             else:
                 score_valor = 5
@@ -1160,7 +1153,7 @@ if check_password():
 
         st.divider()
 
-        st.subheader("💰 Pronóstico de Ingresos (en miles $CL)")
+        st.subheader("💰 Pronóstico de Ingresos")
         probabilidades = {
             "Prospecto": 0.10,
             "Contactado": 0.25,
@@ -1175,8 +1168,8 @@ if check_password():
         forecast_ponderado = df_contactos['Valor_Ponderado'].sum()
 
         col_f1, col_f2 = st.columns(2)
-        col_f1.metric("Valor Total en Pipeline Activo", f"${total_pipeline:,.1f}k $CL")
-        col_f2.metric("Forecast Ponderado (Proyección Real)", f"${forecast_ponderado:,.1f}k $CL")
+        col_f1.metric("Valor Total en Pipeline Activo", f"${total_pipeline:,.0f}")
+        col_f2.metric("Forecast Ponderado (Proyección Real)", f"${forecast_ponderado:,.0f}")
 
         st.divider()
 
@@ -1228,7 +1221,7 @@ if check_password():
                     n_celular = st.text_input("Celular", row.get('Celular', ''))
                     n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']))
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
-                    n_valor = st.number_input("Valor (en miles $CL)", value=float(row['Valor']))
+                    n_valor = st.number_input("Valor", value=float(row['Valor']))
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
                         df_contactos.loc[idx, 'Nombre'] = n_nombre
