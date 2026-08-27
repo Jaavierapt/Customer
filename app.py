@@ -257,7 +257,6 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
-    RUTA_MAESTRA = "Ingresos.xlsx"
     ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
@@ -282,14 +281,15 @@ if check_password():
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        if os.path.exists(RUTA_MAESTRA):
-            df_pdf = pd.read_excel(RUTA_MAESTRA)
-            st.download_button("📥 Descargar Reporte PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
+        # Descarga de reporte PDF conectada directamente a Supabase
+        if st.button("📥 Descargar Reporte PDF"):
+            df_pdf = cargar_datos()
+            st.download_button("📥 Confirmar Descarga PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
 
-        if st.button("🔄 Sincronizar Excel"):
+        if st.button("🔄 Sincronizar Datos"):
             st.cache_data.clear()
-            registrar_log("Sincronización de Excel realizada")
-            st.success("¡Datos sincronizados exitosamente!")
+            registrar_log("Sincronización de datos realizada")
+            st.success("¡Datos sincronizados exitosamente desde Supabase!")
             st.rerun()
        
         if st.button("🚪 Cerrar Sesión"):
@@ -299,50 +299,50 @@ if check_password():
     # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
-    # --- CARGA DE DATOS LOCALES EXCEL / CSV ---
-    @st.cache_data
+    # --- CARGA DE DATOS DESDE SUPABASE ---
+    @st.cache_data(ttl=60)
     def cargar_datos():
-        df = pd.read_excel(RUTA_MAESTRA)
+        """Consulta todos los registros de la tabla 'ingresos' en Supabase."""
+        response = supabase.table("ingresos").select("*").execute()
+        data = response.data
+        
+        if not data:
+            return pd.DataFrame(columns=[
+                "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
+                "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
+                "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
+                "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Ano", "Mes"
+            ])
+            
+        df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()
-         
-        # --- LIMPIEZA ROBUSTA DE MONTO ---
+        
+        # Limpieza de montos
         if 'Monto' in df.columns:
-            if df['Monto'].dtype == object or str(df['Monto'].dtype).startswith('string'):
-                df['Monto'] = (
-                    df['Monto'].astype(str)
-                    .str.replace('$', '', regex=False)
-                    .str.replace('.', '', regex=False)
-                    .str.replace(',', '.', regex=False)
-                    .str.strip()
-                )
             df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
         else:
             df['Monto'] = 0.0
-        # ---------------------------------
-         
+            
         # Conversión de fechas
-        df['Fecha_Cotizacion'] = pd.to_datetime(df.get('Fecha_Cotizacion'), errors='coerce')
-        df['Fecha_OC'] = pd.to_datetime(df.get('Fecha_OC'), errors='coerce')
-        df['Fecha_Emision'] = pd.to_datetime(df.get('Fecha_Emision'), errors='coerce')
-        df['Fecha_GES'] = pd.to_datetime(df.get('Fecha_GES'), errors='coerce')
-        df['Fecha_Pago'] = pd.to_datetime(df.get('Fecha_Pago'), errors='coerce')
-        df['Fecha_Vencimiento'] = pd.to_datetime(df.get('Fecha_Vencimiento'), errors='coerce')
-         
-        # Sincronización automática del estado según la fecha de pago
-        if 'Fecha_Pago' in df.columns:
-            if 'Estado' not in df.columns:
-                df['Estado'] = 'PENDIENTE'
-            df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
-            df.to_excel(RUTA_MAESTRA, index=False)
-         
+        for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+                
+        # Asegurar columnas de año y mes basadas en la fecha de pago
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
         df['Mes'] = df['Fecha_Pago'].dt.month
 
         df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
         df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
-        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+        
+        # Sincronizar nombres de columnas para compatibilidad
+        if 'Grupo_Servicio' in df.columns:
+            df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+        elif 'Grupo Servicio' not in df.columns:
+            df['Grupo Servicio'] = 'SIN SERVICIO'
+            
         df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
-         
+        
         if 'Factura' in df.columns:
             df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
             df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
@@ -518,7 +518,7 @@ if check_password():
     with tab2:
         container_filtros = st.container()
         with container_filtros:
-            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")      
+            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")     
             c_emp1, c_emp2 = st.columns(2)
             for anio, col in zip([2025, 2026], [c_emp1, c_emp2]):
                 with col:
@@ -719,43 +719,39 @@ if check_password():
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
                 
-                if st.form_submit_button("💾 Guardar y Actualizar Excel Automáticamente"):
+                if st.form_submit_button("💾 Guardar y Sincronizar en la Nube"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
-                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
+                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
-                        nueva_fila = pd.DataFrame([{
+                        nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
                             "Empresa": n_empresa_ins.strip().upper(),
                             "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
-                            "Grupo Servicio": n_grupo_servicio.upper(),
+                            "Grupo_Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
                             "Monto": float(n_monto),
-                            "Dias_Programados": float(n_dias_prog),
-                            "Dias_Reales": float(n_dias_real),
-                            "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
-                            "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
-                            "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
-                            "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
-                            "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
-                            "Fecha_Pago": fecha_pago_final,
-                            "Semáforo": "",
+                            "dias_programados": float(n_dias_prog),
+                            "dias_reales": float(n_dias_real),
+                            "Fecha_Cotizacion": str(n_f_cot) if n_f_cot else None,
+                            "Fecha_OC": str(n_f_oc) if n_f_oc else None,
+                            "Fecha_Emision": str(n_f_emi) if n_f_emi else None,
+                            "Fecha_Vencimiento": str(n_f_venc) if n_f_venc else None,
+                            "Fecha_GES": str(n_f_ges) if n_f_ges else None,
+                            "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
+                            "Semaforo": "",
                             "Estado": n_estado_pago,
-                            "Requiere_GES": n_req_ges
-                        }])
+                            "Requiere_GES": n_req_ges,
+                            "Ano": pd.to_datetime(fecha_pago_final).year if fecha_pago_final else None,
+                            "Mes": pd.to_datetime(fecha_pago_final).month if fecha_pago_final else None
+                        }
                         
-                        ruta_absoluta = os.path.join(os.path.dirname(os.path.abspath(__file__)), RUTA_MAESTRA)
-                        
-                        if os.path.exists(ruta_absoluta):
-                            df_actual = pd.read_excel(ruta_absoluta)
-                        else:
-                            df_actual = df.copy()
-                            
-                        df_actualizado = pd.concat([df_actual, nueva_fila], ignore_index=True)
-                        df_actualizado.to_excel(ruta_absoluta, index=False, engine='openpyxl')
-                        
-                        st.cache_data.clear()
-                        st.success("¡Factura guardada y sincronizada físicamente en el Excel!")
-                        st.rerun()
+                        try:
+                            supabase.table("ingresos").upsert(nuevo_registro_supa).execute()
+                            st.cache_data.clear()
+                            st.success(f"¡Factura #{n_factura} guardada y sincronizada en Supabase exitosamente!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar en Supabase: {e}")
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
@@ -784,8 +780,8 @@ if check_password():
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                  
                 # Cálculo de KPIs de eficiencia y cobro para el detalle
-                d_prog = row_det.get('Dias_Programados', 0)
-                d_real = row_det.get('Dias_Reales', 0)
+                d_prog = row_det.get('dias_programados', 0) if 'dias_programados' in row_det else row_det.get('Dias_Programados', 0)
+                d_real = row_det.get('dias_reales', 0) if 'dias_reales' in row_det else row_det.get('Dias_Reales', 0)
                 desviacion = d_real - d_prog
                  
                 f_emi_val = row_det.get('Fecha_Emision')
@@ -843,15 +839,21 @@ if check_password():
                 hide_index=True
             )
 
-            if st.button("💾 Guardar cambios de estados"):
-                df.update(df_editado[['Estado']])
-                df.to_excel(RUTA_MAESTRA, index=False)
+            if st.button("💾 Guardar cambios de estados en la Nube"):
+                for idx, row in df_editado.iterrows():
+                    fac_num = str(row['Factura'])
+                    nuevo_est = row['Estado']
+                    try:
+                        supabase.table("ingresos").update({"Estado": nuevo_est}).eq("Factura", fac_num).execute()
+                    except Exception as e:
+                        st.error(f"Error al actualizar factura {fac_num}: {e}")
                 st.cache_data.clear()
+                st.success("¡Estados actualizados exitosamente en Supabase!")
                 st.session_state["active_tab"] = 3
                 st.rerun()
 
         st.divider()
-           
+          
     with tab5:
         st.header("🔥 Embudo de Ventas y Métricas Comerciales")
 
