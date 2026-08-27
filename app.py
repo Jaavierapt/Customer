@@ -612,7 +612,13 @@ if check_password():
     with tab3:
         st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
-        df_analisis = df.groupby(['Empresa', 'Grupo Servicio'])['Monto'].sum().reset_index()
+        col_servicio = 'Grupo Servicio' if 'Grupo Servicio' in df.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df.columns else None)
+        if col_servicio and col_servicio in df.columns:
+            df_analisis = df.groupby(['Empresa', col_servicio])['Monto'].sum().reset_index()
+            df_analisis = df_analisis.rename(columns={col_servicio: 'Grupo Servicio'})
+        else:
+            df['Grupo Servicio'] = 'SIN SERVICIO'
+            df_analisis = df.groupby(['Empresa', 'Grupo Servicio'])['Monto'].sum().reset_index()
        
         fig_bar = px.bar(
             df_analisis,
