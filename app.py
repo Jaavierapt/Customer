@@ -31,6 +31,66 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+@st.cache_data(ttl=60)
+def cargar_datos():
+    """Consulta todos los registros de la tabla 'ingresos' en Supabase."""
+    response = supabase.table("ingresos").select("*").execute()
+    data = response.data
+    
+    if not data:
+        return pd.DataFrame(columns=[
+            "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
+            "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
+            "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
+            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
+        ])
+        
+    df = pd.DataFrame(data)
+    df.columns = df.columns.str.strip()
+    
+    # Mapeo flexible por si la base de datos devuelve "Ano" en lugar de "Año"
+    if 'Ano' in df.columns and 'Año' not in df.columns:
+        df = df.rename(columns={'Ano': 'Año'})
+    
+    # Limpieza de montos
+    if 'Monto' in df.columns:
+        df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
+    else:
+        df['Monto'] = 0.0
+        
+    # Conversión de fechas
+    for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            
+    # Asegurar columnas de año y mes basadas en la fecha de pago si no vienen o están vacías
+    if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
+        df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
+    else:
+        df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
+
+    if 'Mes' not in df.columns or df['Mes'].isna().all():
+        df['Mes'] = df['Fecha_Pago'].dt.month
+    else:
+        df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
+
+    df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
+    df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
+    
+    # Sincronizar nombres de columnas para compatibilidad
+    if 'Grupo_Servicio' in df.columns:
+        df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+    elif 'Grupo Servicio' not in df.columns:
+        df['Grupo Servicio'] = 'SIN SERVICIO'
+        
+    df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
+    
+    if 'Factura' in df.columns:
+        df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
+        df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
+         
+    return df
+
 def cargar_contactos():
     """Consulta todos los registros de la tabla 'Contactos' en Supabase."""
     response = supabase.table("Contactos").select("*").execute()
@@ -299,67 +359,6 @@ if check_password():
     # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
-    # --- CARGA DE DATOS DESDE SUPABASE ---
-    @st.cache_data(ttl=60)
-    def cargar_datos():
-        """Consulta todos los registros de la tabla 'ingresos' en Supabase."""
-        response = supabase.table("ingresos").select("*").execute()
-        data = response.data
-        
-        if not data:
-            return pd.DataFrame(columns=[
-                "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
-                "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
-                "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-                "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
-            ])
-            
-        df = pd.DataFrame(data)
-        df.columns = df.columns.str.strip()
-        
-        # Mapeo flexible por si la base de datos devuelve "Ano" en lugar de "Año"
-        if 'Ano' in df.columns and 'Año' not in df.columns:
-            df = df.rename(columns={'Ano': 'Año'})
-        
-        # Limpieza de montos
-        if 'Monto' in df.columns:
-            df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
-        else:
-            df['Monto'] = 0.0
-            
-        # Conversión de fechas
-        for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
-                
-        # Asegurar columnas de año y mes basadas en la fecha de pago si no vienen o están vacías
-        if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
-            df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
-        else:
-            df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
-
-        if 'Mes' not in df.columns or df['Mes'].isna().all():
-            df['Mes'] = df['Fecha_Pago'].dt.month
-        else:
-            df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
-
-        df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
-        df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
-        
-        # Sincronizar nombres de columnas para compatibilidad
-        if 'Grupo_Servicio' in df.columns:
-            df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
-        elif 'Grupo Servicio' not in df.columns:
-            df['Grupo Servicio'] = 'SIN SERVICIO'
-            
-        df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
-        
-        if 'Factura' in df.columns:
-            df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
-            df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
-             
-        return df
-   
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
      
@@ -494,7 +493,6 @@ if check_password():
                 st.write(f"### Mix Pagado {anio}")
                 df_anio_pie = df[df['Año'] == anio]
                 if not df_anio_pie.empty:
-                    # Agrupar explícitamente para evitar errores en px.pie si hay filas duplicadas sin agrupar
                     df_pie_grouped = df_anio_pie.groupby('Grupo Servicio', as_index=False)['Monto'].sum()
                     if not df_pie_grouped.empty and df_pie_grouped['Monto'].sum() > 0:
                         fig = px.pie(df_pie_grouped, values='Monto', names='Grupo Servicio', hole=0.4)
