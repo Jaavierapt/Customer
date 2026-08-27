@@ -73,7 +73,7 @@ def calcular_semaforo_avanzado(row):
          
         dias_vencido = (hoy - row['Fecha_Vencimiento']).days
         if dias_vencido <= 0:
-            return 'Azul/Verde (Al día / Por vencer)'
+            return 'Azul/Verde (Azul/Verde)'
         elif dias_vencido <= 15:
             return 'Amarillo (Pendiente con alerta)'
         else:
@@ -311,11 +311,15 @@ if check_password():
                 "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
                 "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
                 "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-                "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Ano", "Mes"
+                "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
             ])
             
         df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()
+        
+        # Mapeo flexible por si la base de datos devuelve "Ano" en lugar de "Año"
+        if 'Ano' in df.columns and 'Año' not in df.columns:
+            df = df.rename(columns={'Ano': 'Año'})
         
         # Limpieza de montos
         if 'Monto' in df.columns:
@@ -328,9 +332,16 @@ if check_password():
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
                 
-        # Asegurar columnas de año y mes basadas en la fecha de pago
-        df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
-        df['Mes'] = df['Fecha_Pago'].dt.month
+        # Asegurar columnas de año y mes basadas en la fecha de pago si no vienen o están vacías
+        if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
+            df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
+        else:
+            df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
+
+        if 'Mes' not in df.columns or df['Mes'].isna().all():
+            df['Mes'] = df['Fecha_Pago'].dt.month
+        else:
+            df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
 
         df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
         df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
@@ -399,9 +410,8 @@ if check_password():
             df['Semáforo'] = df.apply(calcular_semaforo_avanzado, axis=1)
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
-            
+           
         st.subheader("🚨 Alertas de Cobranza Urgentes")
-        # Aseguramos conversión estricta a string para evitar errores en .str.contains
         df['Semáforo'] = df['Semáforo'].astype(str)
         df_criticos = df[df['Semáforo'].str.contains('Rojo|Amarillo', na=False)]
         if not df_criticos.empty:
@@ -743,7 +753,7 @@ if check_password():
                             "Semaforo": "",
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
-                            "Ano": pd.to_datetime(fecha_pago_final).year if fecha_pago_final else None,
+                            "Año": pd.to_datetime(fecha_pago_final).year if fecha_pago_final else None,
                             "Mes": pd.to_datetime(fecha_pago_final).month if fecha_pago_final else None
                         }
                         
