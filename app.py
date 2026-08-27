@@ -33,7 +33,7 @@ supabase = init_supabase()
 
 @st.cache_data(ttl=60)
 def cargar_datos():
-    """Consulta todos los registros de la tabla 'ingresos' en Supabase."""
+    """Consulta todos los registros de la tabla 'ingresos' en Supabase y los depura con seguridad."""
     response = supabase.table("ingresos").select("*").execute()
     data = response.data
     
@@ -52,35 +52,38 @@ def cargar_datos():
     if 'Ano' in df.columns and 'Año' not in df.columns:
         df = df.rename(columns={'Ano': 'Año'})
     
-    # Limpieza de montos
+    # Limpieza robusta de montos (remueve símbolos de moneda o espacios si los hubiera)
     if 'Monto' in df.columns:
+        df['Monto'] = df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
         df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
     else:
         df['Monto'] = 0.0
         
-    # Conversión de fechas
+    # Conversión segura de fechas
     for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asegurar columnas de año y mes basadas en la fecha de pago si no vienen o están vacías
+    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión
     if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
-        df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
+        df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
     else:
         df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
 
     if 'Mes' not in df.columns or df['Mes'].isna().all():
-        df['Mes'] = df['Fecha_Pago'].dt.month
+        df['Mes'] = df['Fecha_Pago'].dt.month.fillna(df['Fecha_Emision'].dt.month).fillna(0).astype(int)
     else:
         df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
 
     df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
     df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
     
-    # Sincronizar nombres de columnas para compatibilidad
+    # Sincronizar nombres de columnas de servicio
     if 'Grupo_Servicio' in df.columns:
         df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
-    elif 'Grupo Servicio' not in df.columns:
+    elif 'Grupo Servicio' in df.columns:
+        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+    else:
         df['Grupo Servicio'] = 'SIN SERVICIO'
         
     df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
@@ -609,8 +612,8 @@ if check_password():
             )
             st.plotly_chart(fig_estacional, use_container_width=True)
 
-        with tab3:
-            st.subheader("📊 Análisis de Servicios Pagados por Empresa")
+    with tab3:
+        st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
         if 'Grupo Service' in df.columns:
             col_serv = 'Grupo Service'
@@ -641,7 +644,6 @@ if check_password():
         st.subheader("📊 Análisis de Ventas Cruzadas (2026)")
         df_2026 = df[df['Año'] == 2026].copy()
         
-        # Asegurar que la columna de servicios exista en df_2026
         col_serv_2026 = 'Grupo Servicio' if 'Grupo Servicio' in df_2026.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df_2026.columns else None)
         if not col_serv_2026:
             df_2026['Grupo Servicio'] = 'SIN SERVICIO'
