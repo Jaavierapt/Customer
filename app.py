@@ -33,14 +33,9 @@ supabase = init_supabase()
 
 def cargar_contactos():
     """Consulta todos los registros de la tabla 'Contactos' en Supabase."""
-    try:
-        response = supabase.table("Contactos").select("*").execute()
-        data = response.data
-        if data:
-            return pd.DataFrame(data)
-    except Exception:
-        pass
-    return pd.DataFrame()
+    response = supabase.table("Contactos").select("*").execute()
+    data = response.data
+    return pd.DataFrame(data)
 
 def guardar_contacto(nombre, email, estado, telefono=""):
     """Inserta un nuevo contacto en la base de datos de Supabase."""
@@ -53,28 +48,21 @@ def guardar_contacto(nombre, email, estado, telefono=""):
     response = supabase.table("Contactos").insert(nuevo_registro).execute()
     return response
 
-def cargar_facturas_supabase():
-    """Consulta todas las facturas/ingresos desde Supabase."""
+def guardar_factura_supabase(registro_dict):
+    """Inserta una nueva factura o registro de ingreso en la tabla 'Facturas' de Supabase."""
     try:
-        response = supabase.table("Facturas").select("*").execute()
-        data = response.data
-        if data:
-            return pd.DataFrame(data)
-    except Exception:
-        pass
-    return pd.DataFrame()
-
-def guardar_factura_supabase(datos_factura):
-    """Inserta una nueva factura en la tabla 'Facturas' de Supabase."""
-    response = supabase.table("Facturas").insert(datos_factura).execute()
-    return response
-
-def actualizar_estado_factura_supabase(factura_num, nuevo_estado):
-    """Actualiza el estado de una factura en Supabase."""
-    try:
-        supabase.table("Facturas").update({"Estado": nuevo_estado}).eq("Factura", str(factura_num)).execute()
+        # Preparar fechas y valores para que sean compatibles con JSON/Supabase
+        datos_supa = {}
+        for k, v in registro_dict.items():
+            if pd.isna(v):
+                datos_supa[k] = None
+            elif isinstance(v, (pd.Timestamp, datetime)):
+                datos_supa[k] = v.strftime("%Y-%m-%d")
+            else:
+                datos_supa[k] = v
+        supabase.table("Facturas").insert(datos_supa).execute()
     except Exception as e:
-        st.error(f"Error al actualizar Supabase: {e}")
+        print(f"Error al sincronizar con Supabase: {e}")
 
 def obtener_consejo_ia(notas_bitacora):
     return (
@@ -286,6 +274,7 @@ def generar_pdf(df_original):
 # =============================================================================
 if check_password():
     RUTA_MAESTRA = "Ingresos.xlsx"
+    ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
 
@@ -309,16 +298,13 @@ if check_password():
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        df_pdf_check = cargar_facturas_supabase()
-        if df_pdf_check.empty and os.path.exists(RUTA_MAESTRA):
-            df_pdf_check = pd.read_excel(RUTA_MAESTRA)
-        
-        if not df_pdf_check.empty:
-            st.download_button("📥 Descargar Reporte PDF", data=generar_pdf(df_pdf_check), file_name="CRM_Itelcam.pdf", mime="application/pdf")
+        if os.path.exists(RUTA_MAESTRA):
+            df_pdf = pd.read_excel(RUTA_MAESTRA)
+            st.download_button("📥 Descargar Reporte PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
 
-        if st.button("🔄 Sincronizar Base de Datos"):
+        if st.button("🔄 Sincronizar Excel"):
             st.cache_data.clear()
-            registrar_log("Sincronización de Base de Datos realizada")
+            registrar_log("Sincronización de Excel realizada")
             st.success("¡Datos sincronizados exitosamente!")
             st.rerun()
        
@@ -329,25 +315,11 @@ if check_password():
     # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
-    # --- CARGA DE DATOS (SUPABASE + RESPALDO LOCAL) ---
+    # --- CARGA DE DATOS LOCALES EXCEL / CSV ---
     @st.cache_data
     def cargar_datos():
-        df = cargar_facturas_supabase()
-        
-        if df.empty and os.path.exists(RUTA_MAESTRA):
-            df = pd.read_excel(RUTA_MAESTRA)
-            
-        if df.empty:
-            df = pd.DataFrame(columns=[
-                "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", "Monto",
-                "Dias_Programados", "Dias_Reales", "Fecha_Cotizacion", "Fecha_OC",
-                "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", "Fecha_Pago", "Semáforo", "Estado", "Requiere_GES"
-            ])
-
+        df = pd.read_excel(RUTA_MAESTRA)
         df.columns = df.columns.str.strip()
-        
-        if 'Grupo Servicio' not in df.columns and 'Grupo_Servicio' in df.columns:
-            df['Grupo Servicio'] = df['Grupo_Servicio']
          
         # --- LIMPIEZA ROBUSTA DE MONTO ---
         if 'Monto' in df.columns:
@@ -372,10 +344,12 @@ if check_password():
         df['Fecha_Pago'] = pd.to_datetime(df.get('Fecha_Pago'), errors='coerce')
         df['Fecha_Vencimiento'] = pd.to_datetime(df.get('Fecha_Vencimiento'), errors='coerce')
          
+        # Sincronización automática del estado según la fecha de pago
         if 'Fecha_Pago' in df.columns:
             if 'Estado' not in df.columns:
                 df['Estado'] = 'PENDIENTE'
             df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
+            df.to_excel(RUTA_MAESTRA, index=False)
          
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
         df['Mes'] = df['Fecha_Pago'].dt.month
@@ -391,12 +365,15 @@ if check_password():
              
         return df
    
-    df_contactos = cargar_contactos()
-    if df_contactos.empty:
-        df_contactos = pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
+    if not os.path.exists(ARCHIVO_CONTACTOS):
+        pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
+     
+    # Manejo de contactos local (CSV para tab 5)
+    df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
     if 'Rol_Contacto' not in df_contactos.columns:
         df_contactos['Rol_Contacto'] = 'Influenciador'
+        df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
 
     df = cargar_datos()
 
@@ -475,7 +452,7 @@ if check_password():
 
         st.subheader("🤖 Asistente de Inteligencia Comercial")
        
-        user_query = st.text_input("Pregúntale algo sobre tus ingresos or tendencias:", key="input_ia")
+        user_query = st.text_input("Pregúntale algo sobre tus ingresos o tendencias:", key="input_ia")
         if st.button("Consultar IA"):
             if user_query:
                 with st.spinner("Procesando consulta local..."):
@@ -763,38 +740,36 @@ if check_password():
                 if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                        
-                        registro_supabase = {
-                            "Factura": str(n_factura),
+                         
+                        nueva_fila = pd.DataFrame([{
+                            "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
                             "Planta": n_planta_ins.upper() if n_planta_ins else "SIN PLANTA",
                             "Grupo Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
-                            "Monto": float(n_monto),
-                            "Dias_Programados": float(n_dias_prog),
-                            "Dias_Reales": float(n_dias_real),
-                            "Fecha_Cotizacion": str(n_f_cot) if n_f_cot else None,
-                            "Fecha_OC": str(n_f_oc) if n_f_oc else None,
-                            "Fecha_Emision": str(n_f_emi) if n_f_emi else None,
-                            "Fecha_Vencimiento": str(n_f_venc) if n_f_venc else None,
-                            "Fecha_GES": str(n_f_ges) if n_f_ges else None,
-                            "Fecha_Pago": str(fecha_pago_final.date()) if pd.notna(fecha_pago_final) else None,
+                            "Monto": n_monto,
+                            "Dias_Programados": n_dias_prog,
+                            "Dias_Reales": n_dias_real,
+                            "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
+                            "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
+                            "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
+                            "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
+                            "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
+                            "Fecha_Pago": fecha_pago_final,
+                            "Semáforo": "",
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges
-                        }
-
-                        try:
-                            guardar_factura_supabase(registro_supabase)
-                            supa_ok = True
-                        except Exception as e:
-                            supa_ok = False
-                            st.error(f"Error al guardar en Supabase: {e}")
+                        }])
+                        
+                        # Guardar localmente en Excel
+                        df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
+                        df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                        
+                        # Guardar en la nube (Supabase)
+                        guardar_factura_supabase(nueva_fila.iloc[0].to_dict())
 
                         st.cache_data.clear()
-                        if supa_ok:
-                            st.success("¡Factura creada y guardada con éxito en la Nube (Supabase)!")
-                        else:
-                            st.warning("¡Hubo un problema al guardar en la nube!")
+                        st.success("¡Factura creada y guardada con éxito en Excel y en la Nube!")
                         st.rerun()
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
@@ -884,13 +859,9 @@ if check_password():
             )
 
             if st.button("💾 Guardar cambios de estados"):
-                for idx, row in df_editado.iterrows():
-                    num_fact = row['Factura']
-                    nuevo_est = row['Estado']
-                    actualizar_estado_factura_supabase(num_fact, nuevo_est)
-
+                df.update(df_editado[['Estado']])
+                df.to_excel(RUTA_MAESTRA, index=False)
                 st.cache_data.clear()
-                st.success("¡Estados actualizados exitosamente en Supabase!")
                 st.session_state["active_tab"] = 3
                 st.rerun()
 
@@ -955,7 +926,7 @@ if check_password():
         st.divider()
 
         # =====================================================================
-        # FORMULARIO UNIFICADO (SUPABASE) 
+        # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
         # =====================================================================
         with st.expander("➕ Crear Nuevo Contacto", expanded=True):
             with st.form("form_contacto_unificado"):
@@ -979,13 +950,25 @@ if check_password():
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
                             supa_success = False
+
+                        nueva = pd.DataFrame([{
+                            "Nombre": nombre,
+                            "Empresa": empresa,
+                            "Planta": planta,
+                            "Correo": correo,
+                            "Celular": celular,
+                            "Estado": estado,
+                            "Valor": valor,
+                            "Bitacora": "",
+                            "Rol_Contacto": rol
+                        }])
+                        pd.concat([df_contactos, nueva], ignore_index=True).to_csv(ARCHIVO_CONTACTOS, index=False)
                          
                         if supa_success:
-                            st.success(f"¡Cliente {nombre} registrado exitosamente en Supabase!")
+                            st.success(f"¡Cliente {nombre} registrado exitosamente en Supabase y Embudo Local!")
                         else:
-                            st.warning(f"¡Hubo un error de conexión con Supabase!")
+                            st.warning(f"¡Cliente {nombre} guardado en tu sistema local, pero hubo un error de conexión con Supabase!")
                              
-                        st.cache_data.clear()
                         st.session_state["active_tab"] = 4
                         st.rerun()
                     else:
@@ -994,7 +977,7 @@ if check_password():
         st.divider()
 
         st.subheader("📊 Gráfico de Conversión")
-        conteo_estados = df_contactos['Estado'].value_counts().reindex(estados).fillna(0).reset_index() if not df_contactos.empty else pd.DataFrame(columns=['Etapa', 'Cantidad'])
+        conteo_estados = df_contactos['Estado'].value_counts().reindex(estados).fillna(0).reset_index()
         conteo_estados.columns = ['Etapa', 'Cantidad']
 
         fig_funnel = px.funnel(
@@ -1011,14 +994,15 @@ if check_password():
         for i, col in enumerate(cols):
             with col:
                 st.subheader(estados[i])
-                contactos_estado = df_contactos[df_contactos["Estado"] == estados[i]] if not df_contactos.empty else pd.DataFrame()
+                contactos_estado = df_contactos[df_contactos["Estado"] == estados[i]]
                 for idx, row in contactos_estado.iterrows():
-                    st.write(f"*{row['nombre']}*")
-                    st.write(f"Correo: {row.get('email', '')}")
-                    st.write(f"Celular: {row.get('telefono', '')}")
-
-                    correo_contacto = row.get('email', '')
-                    nombre_contacto = row.get('nombre', 'Cliente')
+                    st.write(f"*{row['Nombre']}*")
+                    st.write(f"Empresa: {row['Empresa']}")
+                    st.write(f"Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
+                    st.write(f"Valor: ${row['Valor']}")
+                   
+                    correo_contacto = row.get('Correo', '')
+                    nombre_contacto = row.get('Nombre', 'Cliente')
                    
                     if pd.notna(correo_contacto) and str(correo_contacto).strip() != "":
                         asunto = f"Seguimiento de Propuesta / Proyecto - Itelcam"
@@ -1041,12 +1025,195 @@ if check_password():
                     else:
                         st.caption("⚠️ Sin correo registrado")
 
+                    nota_actual = row.get('Bitacora', '')
+                    if pd.isna(nota_actual):
+                        nota_actual = ""
+                         
+                    with st.expander(f"📝 Bitácora ({row['Nombre']})"):
+                        nueva_nota = st.text_area(
+                            "Resumen de llamada/reunión:",
+                            value=nota_actual,
+                            key=f"bitacora_txt_{idx}"
+                        )
+
+                        with st.form(f"form_interaccion_{idx}"):
+                            st.write("Registrar Evento en Línea de Tiempo")
+                            tipo_inter = st.selectbox("Tipo de Interacción", ["Llamada Telefónica", "Reunión", "Correo Electrónico", "WhatsApp"], key=f"tipo_int_{idx}")
+                            detalle_inter = st.text_input("Breve detalle del avance", key=f"det_int_{idx}")
+                           
+                            if st.form_submit_button("➕ Añadir a Línea de Tiempo"):
+                                if detalle_inter.strip() != "":
+                                    nueva_interaccion = pd.DataFrame([{
+                                        "Nombre_Contacto": row['Nombre'],
+                                        "Empresa": row['Empresa'],
+                                        "Tipo": tipo_inter,
+                                        "Detalle": detalle_inter,
+                                        "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    }])
+                                    pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
+                                    st.success("¡Interacción registrada!")
+                                    st.rerun()
+                                else:
+                                    st.warning("Escribe un detalle para la interacción.")
+                       
+                        if nueva_nota.strip() != "":
+                            nota_lower = nueva_nota.lower()
+                            if any(w in nota_lower for w in ["excelente", "genial", "interesado", "positivo", "listo", "pagarán", "agendar"]):
+                                st.success("😊 Sentimiento detectado en nota: **Positivo / Oportunidad Alta**")
+                            elif any(w in nota_lower for w in ["problema", "caro", "retraso", "molesto", "duda", "cancelar", "esperar"]):
+                                st.warning("⚠️ Sentimiento detectado en nota: **Riesgo / Requiere Atención**")
+                            else:
+                                st.info("ℹ️ Sentimiento detectado en nota: **Neutral**")
+
+                        col_b1, col_b2 = st.columns(2)
+                        with col_b1:
+                            if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
+                                df_contactos.loc[idx, 'Bitacora'] = nueva_nota
+                                df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
+                               
+                                nueva_interaccion = pd.DataFrame([{
+                                    "Nombre_Contacto": row['Nombre'],
+                                    "Empresa": row['Empresa'],
+                                    "Tipo": "Nota / Bitácora",
+                                    "Detalle": nueva_nota[:80] + "...",
+                                    "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                }])
+                                pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
+                               
+                                st.success("¡Guardado!")
+                                st.rerun()
+                        with col_b2:
+                            nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']), key=f"mov_{idx}")
+                            if nuevo_estado_rapido != row['Estado']:
+                                df_contactos.loc[idx, 'Estado'] = nuevo_estado_rapido
+                                df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
+                                st.rerun()
+
+                    with st.expander(f"⏱️ Línea de Tiempo ({row['Nombre']})"):
+                        filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row['Nombre']]
+                        if not filtro_inter.empty:
+                            for _, inter_row in filtro_inter.iterrows():
+                                st.caption(f"[{inter_row['Fecha']}] **{inter_row['Tipo']}**: {inter_row['Detalle']}")
+                        else:
+                            st.caption("No hay interacciones registradas aún.")
+
+                    if st.button("🗑️ Borrar", key=f"del_{idx}"):
+                        df_contactos.drop(idx).to_csv(ARCHIVO_CONTACTOS, index=False)
+                        st.session_state["active_tab"] = 4
+                        st.rerun()
+
+        st.divider()
+
+        st.subheader("🎯 Calificación de Prospectos")
+       
+        def calcular_lead_scoring(row):
+            score_valor = 0
+            score_velocidad = 0
+           
+            valor = row.get('Valor', 0)
+            if valor >= 3000000:
+                score_valor = 50
+            elif valor >= 1500000:
+                score_valor = 40
+            elif valor >= 800000:
+                score_valor = 30
+            elif valor >= 400000:
+                score_valor = 15
+            else:
+                score_valor = 5
+               
+            nombre_c = row.get('Nombre', '')
+            interacciones_contacto = df_interacciones[df_interacciones['Nombre_Contacto'] == nombre_c]
+           
+            if not interacciones_contacto.empty and len(interacciones_contacto) >= 2:
+                try:
+                    interacciones_contacto['Fecha_DT'] = pd.to_datetime(interacciones_contacto['Fecha'], errors='coerce')
+                    interacciones_contacto = interacciones_contacto.sort_values(by='Fecha_DT')
+                    diferencias = interacciones_contacto['Fecha_DT'].diff().dt.days.dropna()
+                   
+                    if not diferencias.empty:
+                        promedio_dias_respuesta = diferencias.mean()
+                        if promedio_dias_respuesta <= 2:
+                            score_velocidad = 50
+                        elif promedio_dias_respuesta <= 5:
+                            score_velocidad = 35
+                        elif promedio_dias_respuesta <= 10:
+                            score_velocidad = 20
+                        else:
+                            score_velocidad = 5
+                    else:
+                        score_velocidad = 25
+                except:
+                    score_velocidad = 25
+            else:
+                score_velocidad = 15
+               
+            puntaje_total = score_valor + score_velocidad
+           
+            if puntaje_total >= 70:
+                return pd.Series([puntaje_total, "🔥 Lead Caliente (Alta Prioridad)"])
+            elif puntaje_total >= 40:
+                return pd.Series([puntaje_total, "⚡ Lead Tibio (Seguimiento Activo)"])
+            else:
+                return pd.Series([puntaje_total, "❄️ Lead Frío (Bajo Interés / Lento)"])
+
+        if not df_contactos.empty:
+            df_contactos[['Lead_Score', 'Temperatura_Lead']] = df_contactos.apply(calcular_lead_scoring, axis=1)
+        else:
+            df_contactos['Lead_Score'] = 0
+            df_contactos['Temperatura_Lead'] = "❄️ Lead Frío"
+
+        col_sc1, col_sc2 = st.columns(2)
+        with col_sc1:
+            st.write("### 🌡️ Clasificación de Prospectos por Temperatura")
+            conteo_temp = df_contactos['Temperatura_Lead'].value_counts().reset_index()
+            conteo_temp.columns = ['Temperatura', 'Cantidad']
+            st.dataframe(conteo_temp, hide_index=True, use_container_width=True)
+        with col_sc2:
+            st.write("### 📋 Top Prospectos con mayor score")
+            st.dataframe(df_contactos[['Nombre', 'Empresa', 'Lead_Score', 'Temperatura_Lead', 'Valor']].sort_values(by='Lead_Score', ascending=False).head(5), hide_index=True, use_container_width=True)
+
+        st.divider()
+
+        st.subheader("💰 Pronóstico de Ingresos")
+        probabilidades = {
+            "Prospecto": 0.10,
+            "Contactado": 0.25,
+            "Propuesta": 0.50,
+            "Ganado": 1.00,
+            "Perdido": 0.00
+        }
+        df_contactos['Probabilidad'] = df_contactos['Estado'].map(probabilidades)
+        df_contactos['Valor_Ponderado'] = df_contactos['Valor'] * df_contactos['Probabilidad']
+
+        total_pipeline = df_contactos[df_contactos['Estado'] != 'Perdido']['Valor'].sum()
+        forecast_ponderado = df_contactos['Valor_Ponderado'].sum()
+
+        col_f1, col_f2 = st.columns(2)
+        col_f1.metric("Valor Total en Pipeline Activo", f"${total_pipeline:,.0f}")
+        col_f2.metric("Forecast Ponderado (Proyección Real)", f"${forecast_ponderado:,.0f}")
+
+        st.divider()
+
+        st.subheader("📥 Exportar Datos Comerciales")
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_contactos.to_excel(writer, index=False, sheet_name='Embudo_Contactos')
+        excel_data = output.getvalue()
+
+        st.download_button(
+            label="📊 Descargar Base de Contactos y Bitácoras (Excel)",
+            data=excel_data,
+            file_name="Embudo_Ventas_Itelcam.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheet.sheet"
+        )
+
         st.divider()
 
         st.subheader("🛠️ Módulo de Soporte y Tickets (Helpdesk)")
         with st.expander("➕ Crear Nuevo Ticket de Soporte"):
             with st.form("form_ticket"):
-                t_empresa = st.selectbox("Empresa del Cliente", sorted(df['Empresa'].unique()) if not df.empty else ["EMPRESA"])
+                t_empresa = st.selectbox("Empresa del Cliente", sorted(df['Empresa'].unique()))
                 t_asunto = st.text_input("Asunto / Problema Técnico")
                 t_prioridad = st.selectbox("Prioridad", ["Baja", "Media", "Alta", "Crítica"])
                 t_estado = st.selectbox("Estado del Ticket", ["Abierto", "En Proceso", "Cerrado"])
@@ -1062,3 +1229,33 @@ if check_password():
                     pd.concat([df_tickets, nuevo_t], ignore_index=True).to_csv(ARCHIVO_TICKETS, index=False)
                     st.success("¡Ticket creado con éxito!")
                     st.rerun()
+
+        st.divider()
+
+        with st.expander("✏️ Editar contactos existentes"):
+            for idx, row in df_contactos.iterrows():
+                with st.form(f"edit_{idx}"):
+                    st.write(f"Editando: {row['Nombre']}")
+                    n_nombre = st.text_input("Nombre", row['Nombre'])
+                    n_empresa = st.text_input("Empresa", row['Empresa'])
+                    n_planta = st.text_input("Planta", row['Planta'])
+                    n_correo = st.text_input("Correo", row.get('Correo', ''))
+                    n_celular = st.text_input("Celular", row.get('Celular', ''))
+                    n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']))
+                    n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
+                    n_valor = st.number_input("Valor", value=float(row['Valor']))
+                   
+                    if st.form_submit_button("💾 Guardar Cambios"):
+                        df_contactos.loc[idx, 'Nombre'] = n_nombre
+                        df_contactos.loc[idx, 'Empresa'] = n_empresa
+                        df_contactos.loc[idx, 'Planta'] = n_planta
+                        df_contactos.loc[idx, 'Correo'] = n_correo
+                        df_contactos.loc[idx, 'Celular'] = n_celular
+                        df_contactos.loc[idx, 'Estado'] = n_estado
+                        df_contactos.loc[idx, 'Valor'] = n_valor
+                        df_contactos.loc[idx, 'Rol_Contacto'] = n_rol
+                       
+                        df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
+                        st.success("¡Contacto actualizado con éxito!")
+                        st.session_state["active_tab"] = 4
+                        st.rerun()
