@@ -48,6 +48,22 @@ def guardar_contacto(nombre, email, estado, telefono=""):
     response = supabase.table("Contactos").insert(nuevo_registro).execute()
     return response
 
+def cargar_facturas_supabase():
+    """Consulta todas las facturas/ingresos desde Supabase."""
+    try:
+        response = supabase.table("Facturas").select("*").execute()
+        data = response.data
+        if data:
+            return pd.DataFrame(data)
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+def guardar_factura_supabase(datos_factura):
+    """Inserta una nueva factura en la tabla 'Facturas' de Supabase."""
+    response = supabase.table("Facturas").insert(datos_factura).execute()
+    return response
+
 def obtener_consejo_ia(notas_bitacora):
     return (
         "💡 **Consejo de IA (Entorno Local / VS Code):**\n"
@@ -282,13 +298,17 @@ if check_password():
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        if os.path.exists(RUTA_MAESTRA):
-            df_pdf = pd.read_excel(RUTA_MAESTRA)
-            st.download_button("📥 Descargar Reporte PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
+        # Generar PDF con los datos actuales
+        df_pdf_check = cargar_facturas_supabase()
+        if df_pdf_check.empty and os.path.exists(RUTA_MAESTRA):
+            df_pdf_check = pd.read_excel(RUTA_MAESTRA)
+        
+        if not df_pdf_check.empty:
+            st.download_button("📥 Descargar Reporte PDF", data=generar_pdf(df_pdf_check), file_name="CRM_Itelcam.pdf", mime="application/pdf")
 
-        if st.button("🔄 Sincronizar Excel"):
+        if st.button("🔄 Sincronizar Base de Datos"):
             st.cache_data.clear()
-            registrar_log("Sincronización de Excel realizada")
+            registrar_log("Sincronización de Base de Datos realizada")
             st.success("¡Datos sincronizados exitosamente!")
             st.rerun()
        
@@ -299,11 +319,29 @@ if check_password():
     # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
-    # --- CARGA DE DATOS LOCALES EXCEL / CSV ---
+    # --- CARGA DE DATOS DE FACTURAS (SUPABASE + RESPALDO LOCAL) ---
     @st.cache_data
     def cargar_datos():
-        df = pd.read_excel(RUTA_MAESTRA)
+        # Intentar cargar desde Supabase primero
+        df = cargar_facturas_supabase()
+        
+        # Si Supabase está vacío o no responde, usar el Excel local como respaldo
+        if df.empty and os.path.exists(RUTA_MAESTRA):
+            df = pd.read_excel(RUTA_MAESTRA)
+            
+        if df.empty:
+            # Si no hay nada, crear estructura base vacía
+            df = pd.DataFrame(columns=[
+                "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", "Monto",
+                "Dias_Programados", "Dias_Reales", "Fecha_Cotizacion", "Fecha_OC",
+                "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", "Fecha_Pago", "Semáforo", "Estado", "Requiere_GES"
+            ])
+
         df.columns = df.columns.str.strip()
+        
+        # Mapeo por si las columnas vienen con espacios o nombres alternativos
+        if 'Grupo Servicio' not in df.columns and 'Grupo_Servicio' in df.columns:
+            df['Grupo Servicio'] = df['Grupo_Servicio']
          
         # --- LIMPIEZA ROBUSTA DE MONTO ---
         if 'Monto' in df.columns:
@@ -333,7 +371,6 @@ if check_password():
             if 'Estado' not in df.columns:
                 df['Estado'] = 'PENDIENTE'
             df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
-            df.to_excel(RUTA_MAESTRA, index=False)
          
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
         df['Mes'] = df['Fecha_Pago'].dt.month
@@ -724,7 +761,34 @@ if check_password():
                 if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                         
+                        
+                        registro_supabase = {
+                            "Factura": str(n_factura),
+                            "Empresa": n_empresa_ins.upper(),
+                            "Planta": n_planta_ins.upper() if n_planta_ins else "SIN PLANTA",
+                            "Grupo Servicio": n_grupo_servicio.upper(),
+                            "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
+                            "Monto": float(n_monto),
+                            "Dias_Programados": float(n_dias_prog),
+                            "Dias_Reales": float(n_dias_real),
+                            "Fecha_Cotizacion": str(n_f_cot) if n_f_cot else None,
+                            "Fecha_OC": str(n_f_oc) if n_f_oc else None,
+                            "Fecha_Emision": str(n_f_emi) if n_f_emi else None,
+                            "Fecha_Vencimiento": str(n_f_venc) if n_f_venc else None,
+                            "Fecha_GES": str(n_f_ges) if n_f_ges else None,
+                            "Fecha_Pago": str(fecha_pago_final.date()) if pd.notna(fecha_pago_final) else None,
+                            "Estado": n_estado_pago,
+                            "Requiere_GES": n_req_ges
+                        }
+
+                        try:
+                            guardar_factura_supabase(registro_supabase)
+                            supa_ok = True
+                        except Exception as e:
+                            supa_ok = False
+                            st.error(f"Error al guardar en Supabase: {e}")
+
+                        # Respaldo local en Excel por si acaso
                         nueva_fila = pd.DataFrame([{
                             "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
@@ -745,9 +809,16 @@ if check_password():
                             "Requiere_GES": n_req_ges
                         }])
                         df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
-                        df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                        try:
+                            df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                        except:
+                            pass
+
                         st.cache_data.clear()
-                        st.success("¡Factura creada y guardada con éxito en el Excel!")
+                        if supa_ok:
+                            st.success("¡Factura creada y guardada con éxito en la Nube (Supabase)!")
+                        else:
+                            st.warning("¡Factura guardada localmente, pero hubo problemas con la nube!")
                         st.rerun()
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
@@ -838,7 +909,10 @@ if check_password():
 
             if st.button("💾 Guardar cambios de estados"):
                 df.update(df_editado[['Estado']])
-                df.to_excel(RUTA_MAESTRA, index=False)
+                try:
+                    df.to_excel(RUTA_MAESTRA, index=False)
+                except:
+                    pass
                 st.cache_data.clear()
                 st.session_state["active_tab"] = 3
                 st.rerun()
