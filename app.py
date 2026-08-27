@@ -298,7 +298,6 @@ if check_password():
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        # Generar PDF con los datos actuales
         df_pdf_check = cargar_facturas_supabase()
         if df_pdf_check.empty and os.path.exists(RUTA_MAESTRA):
             df_pdf_check = pd.read_excel(RUTA_MAESTRA)
@@ -319,18 +318,15 @@ if check_password():
     # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
-    # --- CARGA DE DATOS DE FACTURAS (SUPABASE + RESPALDO LOCAL) ---
+    # --- CARGA DE DATOS (SUPABASE + RESPALDO LOCAL) ---
     @st.cache_data
     def cargar_datos():
-        # Intentar cargar desde Supabase primero
         df = cargar_facturas_supabase()
         
-        # Si Supabase está vacío o no responde, usar el Excel local como respaldo
         if df.empty and os.path.exists(RUTA_MAESTRA):
             df = pd.read_excel(RUTA_MAESTRA)
             
         if df.empty:
-            # Si no hay nada, crear estructura base vacía
             df = pd.DataFrame(columns=[
                 "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", "Monto",
                 "Dias_Programados", "Dias_Reales", "Fecha_Cotizacion", "Fecha_OC",
@@ -339,7 +335,6 @@ if check_password():
 
         df.columns = df.columns.str.strip()
         
-        # Mapeo por si las columnas vienen con espacios o nombres alternativos
         if 'Grupo Servicio' not in df.columns and 'Grupo_Servicio' in df.columns:
             df['Grupo Servicio'] = df['Grupo_Servicio']
          
@@ -366,7 +361,6 @@ if check_password():
         df['Fecha_Pago'] = pd.to_datetime(df.get('Fecha_Pago'), errors='coerce')
         df['Fecha_Vencimiento'] = pd.to_datetime(df.get('Fecha_Vencimiento'), errors='coerce')
          
-        # Sincronización automática del estado según la fecha de pago
         if 'Fecha_Pago' in df.columns:
             if 'Estado' not in df.columns:
                 df['Estado'] = 'PENDIENTE'
@@ -389,7 +383,6 @@ if check_password():
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
      
-    # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
     if 'Rol_Contacto' not in df_contactos.columns:
@@ -788,7 +781,6 @@ if check_password():
                             supa_ok = False
                             st.error(f"Error al guardar en Supabase: {e}")
 
-                        # Respaldo local en Excel por si acaso
                         nueva_fila = pd.DataFrame([{
                             "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
