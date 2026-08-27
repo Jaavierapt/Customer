@@ -273,7 +273,7 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
-    RUTA_MAESTRA = r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"
+    RUTA_MAESTRA = "Ingresos.xlsx" if os.path.exists("Ingresos.xlsx") else r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"
     ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
@@ -723,7 +723,6 @@ if check_password():
                 with fc2:
                     n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
                     
-                    # Usamos checkbox o selección de fecha segura para evitar errores con nulos en formularios
                     tiene_f_pago = st.checkbox("¿Tiene Fecha de Pago?")
                     n_f_pago = st.date_input("Fecha de Pago", value=datetime.now()) if tiene_f_pago else None
                          
@@ -771,11 +770,9 @@ if check_password():
                         }])
                         
                         try:
-                            # 1. Guardar localmente en Excel usando la ruta absoluta
                             df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
                             df_actualizado.to_excel(RUTA_MAESTRA, index=False)
                             
-                            # 2. Guardar en la nube (Supabase)
                             guardar_factura_supabase(nueva_fila.iloc[0].to_dict())
 
                             st.cache_data.clear()
@@ -1254,7 +1251,7 @@ if check_password():
                     n_celular = st.text_input("Celular", row.get('Celular', ''))
                     n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']))
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
-                    n_valor = st.number_input("Valor", value=float(row['Valor']))
+                    n_valor = st.number_input("Value", value=float(row['Valor']))
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
                         df_contactos.loc[idx, 'Nombre'] = n_nombre
