@@ -720,49 +720,44 @@ if check_password():
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
                 
                 if st.form_submit_button("💾 Guardar y Actualizar Excel Automáticamente"):
-                if n_factura.strip() != "" and n_empresa_ins.strip() != "":
-                    fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                    
-                    nueva_fila = pd.DataFrame([{
-                        "Factura": str(n_factura).strip(),
-                        "Empresa": n_empresa_ins.strip().upper(),
-                        "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
-                        "Grupo Servicio": n_grupo_servicio.upper(),
-                        "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
-                        "Monto": float(n_monto),
-                        "Dias_Programados": float(n_dias_prog),
-                        "Dias_Reales": float(n_dias_real),
-                        "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
-                        "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
-                        "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
-                        "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
-                        "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
-                        "Fecha_Pago": fecha_pago_final,
-                        "Semáforo": "",
-                        "Estado": n_estado_pago,
-                        "Requiere_GES": n_req_ges
-                    }])
-                    
-                    # 1. Definir ruta absoluta para asegurar que guarde en la misma carpeta del script
-                    ruta_absoluta = os.path.join(os.path.dirname(os.path.abspath(__file__)), RUTA_MAESTRA)
-                    
-                    # 2. Concatenar con los datos actuales del Excel (leyéndolo fresco del disco)
-                    if os.path.exists(ruta_absoluta):
-                        df_actual = pd.read_excel(ruta_absoluta)
-                    else:
-                        df_actual = df.copy()
+                    if n_factura.strip() != "" and n_empresa_ins.strip() != "":
+                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
                         
-                    df_actualizado = pd.concat([df_actual, nueva_fila], ignore_index=True)
-                    
-                    # 3. Guardar físicamente usando el motor openpyxl
-                    df_actualizado.to_excel(ruta_absoluta, index=False, engine='openpyxl')
-                    
-                    # 4. Limpiar caché de Streamlit y reiniciar ciclo
-                    st.cache_data.clear()
-                    st.success("¡Factura guardada y sincronizada físicamente en el Excel!")
-                    st.rerun()
-                else:
-                    st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
+                        nueva_fila = pd.DataFrame([{
+                            "Factura": str(n_factura).strip(),
+                            "Empresa": n_empresa_ins.strip().upper(),
+                            "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
+                            "Grupo Servicio": n_grupo_servicio.upper(),
+                            "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
+                            "Monto": float(n_monto),
+                            "Dias_Programados": float(n_dias_prog),
+                            "Dias_Reales": float(n_dias_real),
+                            "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
+                            "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
+                            "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
+                            "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
+                            "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
+                            "Fecha_Pago": fecha_pago_final,
+                            "Semáforo": "",
+                            "Estado": n_estado_pago,
+                            "Requiere_GES": n_req_ges
+                        }])
+                        
+                        ruta_absoluta = os.path.join(os.path.dirname(os.path.abspath(__file__)), RUTA_MAESTRA)
+                        
+                        if os.path.exists(ruta_absoluta):
+                            df_actual = pd.read_excel(ruta_absoluta)
+                        else:
+                            df_actual = df.copy()
+                            
+                        df_actualizado = pd.concat([df_actual, nueva_fila], ignore_index=True)
+                        df_actualizado.to_excel(ruta_absoluta, index=False, engine='openpyxl')
+                        
+                        st.cache_data.clear()
+                        st.success("¡Factura guardada y sincronizada físicamente en el Excel!")
+                        st.rerun()
+                    else:
+                        st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         st.divider()
 
