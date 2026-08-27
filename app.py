@@ -395,12 +395,14 @@ if check_password():
 
         st.divider()
 
-        if 'Fecha_Vencimiento' in df.columns:
+       if 'Fecha_Vencimiento' in df.columns and not df.empty:
             df['Semáforo'] = df.apply(calcular_semaforo_avanzado, axis=1)
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
-           
+            
         st.subheader("🚨 Alertas de Cobranza Urgentes")
+        # Aseguramos conversión estricta a string para evitar errores en .str.contains
+        df['Semáforo'] = df['Semáforo'].astype(str)
         df_criticos = df[df['Semáforo'].str.contains('Rojo|Amarillo', na=False)]
         if not df_criticos.empty:
             st.warning(f"Tienes **{len(df_criticos)} documentos** que requieren gestión de cobranza inmediata.")
