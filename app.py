@@ -609,7 +609,6 @@ if check_password():
             )
             st.plotly_chart(fig_estacional, use_container_width=True)
 
-    
         with tab3:
         st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
