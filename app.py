@@ -395,7 +395,7 @@ if check_password():
 
         st.divider()
 
-       if 'Fecha_Vencimiento' in df.columns and not df.empty:
+        if 'Fecha_Vencimiento' in df.columns and not df.empty:
             df['Semáforo'] = df.apply(calcular_semaforo_avanzado, axis=1)
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
