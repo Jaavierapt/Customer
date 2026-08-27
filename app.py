@@ -48,22 +48,6 @@ def guardar_contacto(nombre, email, estado, telefono=""):
     response = supabase.table("Contactos").insert(nuevo_registro).execute()
     return response
 
-def guardar_factura_supabase(registro_dict):
-    """Inserta una nueva factura o registro de ingreso en la tabla 'Facturas' de Supabase."""
-    try:
-        # Preparar fechas y valores para que sean compatibles con JSON/Supabase
-        datos_supa = {}
-        for k, v in registro_dict.items():
-            if pd.isna(v):
-                datos_supa[k] = None
-            elif isinstance(v, (pd.Timestamp, datetime)):
-                datos_supa[k] = v.strftime("%Y-%m-%d")
-            else:
-                datos_supa[k] = v
-        supabase.table("Facturas").insert(datos_supa).execute()
-    except Exception as e:
-        print(f"Error al sincronizar con Supabase: {e}")
-
 def obtener_consejo_ia(notas_bitacora):
     return (
         "💡 **Consejo de IA (Entorno Local / VS Code):**\n"
@@ -273,7 +257,7 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
-    RUTA_MAESTRA = "Ingresos.xlsx" if os.path.exists("Ingresos.xlsx") else r"C:\Users\office\Desktop\CRM web\Proyecto CRM\Ingresos.xlsx"
+    RUTA_MAESTRA = "Ingresos.xlsx"
     ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
@@ -704,7 +688,7 @@ if check_password():
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
-            with st.form("form_nueva_factura", clear_on_submit=True):
+            with st.form("form_nueva_factura"):
                 fc1, fc2 = st.columns(2)
                 with fc1:
                     n_factura = st.text_input("Número de Factura / Documento")
@@ -715,49 +699,41 @@ if check_password():
                     n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
                      
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
+                     
                     n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
                      
+                    # Nuevos campos de ejecución
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
                     n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
 
                 with fc2:
                     n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
-                    
-                    tiene_f_pago = st.checkbox("¿Tiene Fecha de Pago?")
-                    n_f_pago = st.date_input("Fecha de Pago", value=datetime.now()) if tiene_f_pago else None
+                    if n_estado_pago == "Pagado":
+                        n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
+                    else:
+                        n_f_pago = st.date_input("Fecha de Pago", value=None)
                          
-                    tiene_f_cot = st.checkbox("¿Tiene Fecha Cotización?")
-                    n_f_cot = st.date_input("Fecha Cotización", value=datetime.now()) if tiene_f_cot else None
-
-                    tiene_f_oc = st.checkbox("¿Tiene Fecha Orden de Compra?")
-                    n_f_oc = st.date_input("Fecha Orden de Compra", value=datetime.now()) if tiene_f_oc else None
-
-                    tiene_f_emi = st.checkbox("¿Tiene Fecha Emisión?")
-                    n_f_emi = st.date_input("Fecha Emisión", value=datetime.now()) if tiene_f_emi else None
-
-                    tiene_f_venc = st.checkbox("¿Tiene Fecha Vencimiento?")
-                    n_f_venc = st.date_input("Fecha Vencimiento", value=datetime.now()) if tiene_f_venc else None
+                    n_f_cot = st.date_input("Fecha Cotización", value=None)
+                    n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
+                    n_f_emi = st.date_input("Fecha Emisión", value=None)
+                    n_f_venc = st.date_input("Fecha Vencimiento", value=None)
                      
-                    tiene_f_ges = st.checkbox("¿Tiene Fecha GES?")
-                    n_f_ges = st.date_input("Fecha GES (si aplica)", value=datetime.now()) if tiene_f_ges else None
-                    
+                    n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
                
-                submitted_factura = st.form_submit_button("💾 Guardar Nueva Factura")
-
-                if submitted_factura:
+                if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
                          
                         nueva_fila = pd.DataFrame([{
-                            "Factura": str(n_factura),
+                            "Factura": n_factura,
                             "Empresa": n_empresa_ins.upper(),
                             "Planta": n_planta_ins.upper() if n_planta_ins else "SIN PLANTA",
                             "Grupo Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
-                            "Monto": float(n_monto),
-                            "Dias_Programados": float(n_dias_prog),
-                            "Dias_Reales": float(n_dias_real),
+                            "Monto": n_monto,
+                            "Dias_Programados": n_dias_prog,
+                            "Dias_Reales": n_dias_real,
                             "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
                             "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
                             "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
@@ -768,19 +744,13 @@ if check_password():
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges
                         }])
-                        
-                        try:
-                            df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
-                            df_actualizado.to_excel(RUTA_MAESTRA, index=False)
-                            
-                            guardar_factura_supabase(nueva_fila.iloc[0].to_dict())
-
-                            st.cache_data.clear()
-                            st.success("¡Factura creada y guardada con éxito en tu Excel local y en Supabase!")
-                        except Exception as e:
-                            st.error(f"Error al guardar los datos: {e}")
+                        df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
+                        df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                        st.cache_data.clear()
+                        st.success("¡Factura creada y guardada con éxito en el Excel!")
+                        st.rerun()
                     else:
-                      st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
+                        st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         st.divider()
 
@@ -1036,7 +1006,7 @@ if check_password():
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
                         nota_actual = ""
-                         
+                       
                     with st.expander(f"📝 Bitácora ({row['Nombre']})"):
                         nueva_nota = st.text_area(
                             "Resumen de llamada/reunión:",
@@ -1251,7 +1221,7 @@ if check_password():
                     n_celular = st.text_input("Celular", row.get('Celular', ''))
                     n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']))
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
-                    n_valor = st.number_input("Value", value=float(row['Valor']))
+                    n_valor = st.number_input("Valor", value=float(row['Valor']))
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
                         df_contactos.loc[idx, 'Nombre'] = n_nombre
