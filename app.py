@@ -492,8 +492,17 @@ if check_password():
         for anio, col in zip([2025, 2026], [c1, c2]):
             with col:
                 st.write(f"### Mix Pagado {anio}")
-                fig = px.pie(df[df['Año'] == anio], values='Monto', names='Grupo Servicio', hole=0.4)
-                st.plotly_chart(fig, use_container_width=True)
+                df_anio_pie = df[df['Año'] == anio]
+                if not df_anio_pie.empty:
+                    # Agrupar explícitamente para evitar errores en px.pie si hay filas duplicadas sin agrupar
+                    df_pie_grouped = df_anio_pie.groupby('Grupo Servicio', as_index=False)['Monto'].sum()
+                    if not df_pie_grouped.empty and df_pie_grouped['Monto'].sum() > 0:
+                        fig = px.pie(df_pie_grouped, values='Monto', names='Grupo Servicio', hole=0.4)
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info(f"Sin montos registrados para el año {anio}")
+                else:
+                    st.info(f"Sin registros para el año {anio}")
 
         st.subheader("📉 Alertas Tempranas Riesgo de Abandono (Ingresos Reales)")
         if 'Año' in df.columns and 'Mes' in df.columns and 'Empresa' in df.columns:
@@ -537,8 +546,12 @@ if check_password():
                     st.write(f"### Ingresos Reales por Empresa {anio}")
                     df_anio = df[df['Año'] == anio]
                     if not df_anio.empty:
-                        fig_emp = px.pie(df_anio, values='Monto', names='Empresa')
-                        st.plotly_chart(fig_emp, use_container_width=True)
+                        df_emp_grouped = df_anio.groupby('Empresa', as_index=False)['Monto'].sum()
+                        if not df_emp_grouped.empty and df_emp_grouped['Monto'].sum() > 0:
+                            fig_emp = px.pie(df_emp_grouped, values='Monto', names='Empresa')
+                            st.plotly_chart(fig_emp, use_container_width=True)
+                        else:
+                            st.info(f"Sin montos en {anio}")
                     else:
                         st.info(f"No hay pagos registrados para {anio}")
             st.divider()
@@ -552,8 +565,12 @@ if check_password():
                     st.write(f"#### Año {anio}")
                     df_filtro = df[(df['Empresa'] == empresa_sel) & (df['Año'] == anio)]
                     if not df_filtro.empty:
-                        fig_p = px.pie(df_filtro, values='Monto', names='Planta')
-                        st.plotly_chart(fig_p, use_container_width=True)
+                        df_planta_grouped = df_filtro.groupby('Planta', as_index=False)['Monto'].sum()
+                        if not df_planta_grouped.empty and df_planta_grouped['Monto'].sum() > 0:
+                            fig_p = px.pie(df_planta_grouped, values='Monto', names='Planta')
+                            st.plotly_chart(fig_p, use_container_width=True)
+                        else:
+                            st.write(f"Sin montos en {anio}")
                     else:
                         st.write(f"Sin pagos en {anio}")
             st.divider()
