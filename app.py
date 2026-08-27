@@ -685,73 +685,75 @@ if check_password():
             st.warning("No hay datos suficientes de pagos del año 2026 para ejecutar el Gap Analysis.")
 
     with tab4:
-        st.header("➕ Gestión de Facturas y Ciclo de Pago")
+    st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
-        with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
-            with st.form("form_nueva_factura"):
-                fc1, fc2 = st.columns(2)
-                with fc1:
-                    n_factura = st.text_input("Número de Factura / Documento")
-                    n_empresa_ins = st.text_input("Empresa")
-                    n_planta_ins = st.text_input("Planta")
-                     
-                    servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
-                    n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
-                     
-                    n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
-                     
-                    n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
-                     
-                    # Nuevos campos de ejecución
-                    n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
-                    n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
+    with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
+        with st.form("form_nueva_factura", clear_on_submit=True):
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                n_factura = st.text_input("Número de Factura / Documento")
+                n_empresa_ins = st.text_input("Empresa")
+                n_planta_ins = st.text_input("Planta")
+                
+                servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
+                
+                n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
+                n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
+                
+                n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
+                n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
 
-                with fc2:
-                    n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
-                    if n_estado_pago == "Pagado":
-                        n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
-                    else:
-                        n_f_pago = st.date_input("Fecha de Pago", value=None)
-                         
-                    n_f_cot = st.date_input("Fecha Cotización", value=None)
-                    n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
-                    n_f_emi = st.date_input("Fecha Emisión", value=None)
-                    n_f_venc = st.date_input("Fecha Vencimiento", value=None)
-                     
-                    n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
-                    n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
-               
-                if st.form_submit_button("💾 Guardar Nueva Factura"):
-                    if n_factura.strip() != "" and n_empresa_ins.strip() != "":
-                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
-                         
-                        nueva_fila = pd.DataFrame([{
-                            "Factura": n_factura,
-                            "Empresa": n_empresa_ins.upper(),
-                            "Planta": n_planta_ins.upper() if n_planta_ins else "SIN PLANTA",
-                            "Grupo Servicio": n_grupo_servicio.upper(),
-                            "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
-                            "Monto": n_monto,
-                            "Dias_Programados": n_dias_prog,
-                            "Dias_Reales": n_dias_real,
-                            "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
-                            "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
-                            "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
-                            "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
-                            "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
-                            "Fecha_Pago": fecha_pago_final,
-                            "Semáforo": "",
-                            "Estado": n_estado_pago,
-                            "Requiere_GES": n_req_ges
-                        }])
-                        df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
-                        df_actualizado.to_excel(RUTA_MAESTRA, index=False)
-                        st.cache_data.clear()
-                        st.success("¡Factura creada y guardada con éxito en el Excel!")
-                        st.rerun()
-                    else:
-                        st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
-
+            with fc2:
+                n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
+                if n_estado_pago == "Pagado":
+                    n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
+                else:
+                    n_f_pago = st.date_input("Fecha de Pago", value=None)
+                    
+                n_f_cot = st.date_input("Fecha Cotización", value=None)
+                n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
+                n_f_emi = st.date_input("Fecha Emisión", value=None)
+                n_f_venc = st.date_input("Fecha Vencimiento", value=None)
+                
+                n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
+                n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
+            
+            if st.form_submit_button("💾 Guardar y Actualizar Excel Automáticamente"):
+                if n_factura.strip() != "" and n_empresa_ins.strip() != "":
+                    fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
+                    
+                    nueva_fila = pd.DataFrame([{
+                        "Factura": str(n_factura).strip(),
+                        "Empresa": n_empresa_ins.strip().upper(),
+                        "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
+                        "Grupo Servicio": n_grupo_servicio.upper(),
+                        "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
+                        "Monto": float(n_monto),
+                        "Dias_Programados": float(n_dias_prog),
+                        "Dias_Reales": float(n_dias_real),
+                        "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
+                        "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
+                        "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
+                        "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
+                        "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
+                        "Fecha_Pago": fecha_pago_final,
+                        "Semáforo": "",
+                        "Estado": n_estado_pago,
+                        "Requiere_GES": n_req_ges
+                    }])
+                    
+                    # Concatenar y guardar directamente en el archivo Excel maestro
+                    df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
+                    df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                    
+                    # Limpiar caché para refrescar los gráficos y métricas inmediatamente
+                    st.cache_data.clear()
+                    st.success("¡Factura guardada y sincronizada automáticamente en el Excel!")
+                    st.rerun()
+                else:
+                    st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
+                    
         st.divider()
 
         if 'Fecha_Vencimiento' in df.columns:
