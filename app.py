@@ -803,7 +803,7 @@ if check_password():
                             "Semaforo": "",
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
-                            "Año": anio_val,
+                            "Ano": anio_val,
                             "Mes": mes_val
                         }
                         
