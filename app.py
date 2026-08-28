@@ -31,114 +31,6 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-def limpiar_texto_espanol(texto):
-    """Elimina tildes y eñes para evitar errores de codificación en gráficos y PDF."""
-    if not isinstance(texto, str):
-        return str(texto)
-    return (
-        texto.upper()
-        .replace('Á', 'A')
-        .replace('É', 'E')
-        .replace('Í', 'I')
-        .replace('Ó', 'O')
-        .replace('Ú', 'U')
-        .replace('Ñ', 'N')
-    )
-
-def normalizar_columnas_df(df):
-    """Normaliza de forma global las columnas para ignorar tildes, eñes, mayúsculas y espacios."""
-    if df.empty:
-        return df
-    
-    df.columns = df.columns.str.strip()
-    renombres = {}
-    
-    for col in df.columns:
-        col_limpia = col.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
-        
-        if col_limpia in ['ano', 'anio', 'agno', 'año']:
-            renombres[col] = 'Año'
-        elif col_limpia == 'mes':
-            renombres[col] = 'Mes'
-        elif col_limpia in ['grupo_servicio', 'grupo servicio', 'gruposervicio']:
-            renombres[col] = 'Grupo Servicio'
-        elif col_limpia in ['factura', 'n_factura', 'num_factura']:
-            renombres[col] = 'Factura'
-        elif col_limpia == 'empresa':
-            renombres[col] = 'Empresa'
-        elif col_limpia == 'planta':
-            renombres[col] = 'Planta'
-        elif col_limpia == 'servicio':
-            renombres[col] = 'Servicio'
-        elif col_limpia == 'monto':
-            renombres[col] = 'Monto'
-        elif col_limpia in ['estado', 'estado_pago']:
-            renombres[col] = 'Estado'
-            
-    df = df.rename(columns=renombres)
-    
-    for col_orig in df.columns:
-        col_std = col_orig.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
-        if col_std in ['ano', 'anio', 'agno', 'año'] and 'Año' not in df.columns:
-            df['Año'] = df[col_orig]
-        if col_std == 'mes' and 'Mes' not in df.columns:
-            df['Mes'] = df[col_orig]
-            
-    return df
-
-@st.cache_data(ttl=60)
-def cargar_datos():
-    """Consulta todos los registros de la tabla 'ingresos' en Supabase y los normaliza globalmente."""
-    response = supabase.table("ingresos").select("*").execute()
-    data = response.data
-    
-    if not data:
-        return pd.DataFrame(columns=[
-            "Factura", "Empresa", "Planta", "Grupo Servicio", "Servicio", 
-            "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
-            "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
-        ])
-        
-    df = pd.DataFrame(data)
-    df = normalizar_columnas_df(df)
-    
-    if 'Monto' in df.columns:
-        df['Monto'] = df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-        df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
-    else:
-        df['Monto'] = 0.0
-        
-    for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-            
-    if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
-        df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
-    else:
-        df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
-
-    if 'Mes' not in df.columns or df['Mes'].isna().all() or (df['Mes'] == 0).all():
-        df['Mes'] = df['Fecha_Pago'].dt.month.fillna(df['Fecha_Emision'].dt.month).fillna(0).astype(int)
-    else:
-        df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
-
-    df['Empresa'] = df['Empresa'].astype(str).str.strip().apply(limpiar_texto_espanol)
-    df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().apply(limpiar_texto_espanol)
-    
-    if 'Grupo Servicio' not in df.columns:
-        df['Grupo Servicio'] = 'SIN SERVICIO'
-    else:
-        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().apply(limpiar_texto_espanol)
-        
-    df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().apply(limpiar_texto_espanol)
-    
-    if 'Factura' in df.columns:
-        df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
-        df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
-         
-    return df
-
 def cargar_contactos():
     """Consulta todos los registros de la tabla 'Contactos' en Supabase."""
     response = supabase.table("Contactos").select("*").execute()
@@ -148,7 +40,7 @@ def cargar_contactos():
 def guardar_contacto(nombre, email, estado, telefono=""):
     """Inserta un nuevo contacto en la base de datos de Supabase."""
     nuevo_registro = {
-        "nombre": limpiar_texto_espanol(nombre),
+        "nombre": nombre,
         "email": email,
         "estado": estado,
         "telefono": telefono
@@ -181,7 +73,7 @@ def calcular_semaforo_avanzado(row):
          
         dias_vencido = (hoy - row['Fecha_Vencimiento']).days
         if dias_vencido <= 0:
-            return 'Azul/Verde (Azul/Verde)'
+            return 'Azul/Verde (Al día / Por vencer)'
         elif dias_vencido <= 15:
             return 'Amarillo (Pendiente con alerta)'
         else:
@@ -242,9 +134,9 @@ def generar_pdf(df_original):
 
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}", ln=True)
-    pdf.cell(200, 6, txt=f"Total Clientes: {limpiar_texto_espanol(str(total_clientes))}", ln=True)
+    pdf.cell(200, 6, txt=f"Total Clientes: {total_clientes}", ln=True)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(200, 6, txt=f"KPIs Anuales (Segun Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}", ln=True)
+    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}", ln=True)
     pdf.ln(5)
 
     if 'Mes' in df.columns and 'Año' in df.columns:
@@ -259,7 +151,7 @@ def generar_pdf(df_original):
         plt.xlabel("Mes", fontsize=9)
         plt.ylabel("Monto Pagado", fontsize=9)
         plt.xticks(rotation=0)
-        plt.legend(title="Ano")
+        plt.legend(title="Año")
         plt.tight_layout()
        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
@@ -289,7 +181,7 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Ano {anio}", ln=True)
+        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Año {anio}", ln=True)
         pdf.image(tmp_path, x=25, w=150)
         os.remove(tmp_path)
         pdf.ln(2)
@@ -298,7 +190,7 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Empresas ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in empresa_data.iterrows():
-            pdf.cell(90, 5, limpiar_texto_espanol(f"{row['Empresa']}: ${row['Monto']:,.0f}"), border=1)
+            pdf.cell(90, 5, f"{row['Empresa']}: ${row['Monto']:,.0f}", border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -310,11 +202,11 @@ def generar_pdf(df_original):
         total_monto = servicio_data['Monto'].sum()
         if total_monto > 0:
             etiquetas_leyenda = [
-                limpiar_texto_espanol(f"{row['Grupo Servicio']} ({row['Monto']/total_monto*100:.1f}%)")
+                f"{row['Grupo Servicio']} ({row['Monto']/total_monto*100:.1f}%)"
                 for _, row in servicio_data.iterrows()
             ]
         else:
-            etiquetas_leyenda = [limpiar_texto_espanol(f"{row['Grupo Servicio']} (0.0%)") for _, row in servicio_data.iterrows()]
+            etiquetas_leyenda = [f"{row['Grupo Servicio']} (0.0%)" for _, row in servicio_data.iterrows()]
        
         plt.figure(figsize=(6, 3.2))
         wedges, texts = plt.pie(
@@ -332,7 +224,7 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Ano {anio}", ln=True)
+        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Año {anio}", ln=True)
         pdf.image(tmp_path, x=20, w=160)
         os.remove(tmp_path)
         pdf.ln(2)
@@ -341,7 +233,7 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Mix de Servicios ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in servicio_data.iterrows():
-            pdf.cell(90, 5, limpiar_texto_espanol(f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}"), border=1)
+            pdf.cell(90, 5, f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}", border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -365,6 +257,7 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
+    RUTA_MAESTRA = "Ingresos.xlsx"
     ARCHIVO_CONTACTOS = "contactos.csv"
     ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
@@ -382,32 +275,84 @@ if check_password():
 
     def registrar_log(accion):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.session_state["log_actividad"].insert(0, f"[{timestamp}] - {st.session_state.get('user_email', 'Sistema')}: {limpiar_texto_espanol(accion)}")
+        st.session_state["log_actividad"].insert(0, f"[{timestamp}] - {st.session_state.get('user_email', 'Sistema')}: {accion}")
 
     with st.sidebar:
         st.write(f"**Usuario:** {st.session_state['user_email']}")
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        if st.button("📥 Descargar Reporte PDF"):
-            df_pdf = cargar_datos()
-            st.download_button("📥 Confirmar Descarga PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
+        if os.path.exists(RUTA_MAESTRA):
+            df_pdf = pd.read_excel(RUTA_MAESTRA)
+            st.download_button("📥 Descargar Reporte PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
 
-        if st.button("🔄 Sincronizar Datos"):
+        if st.button("🔄 Sincronizar Excel"):
             st.cache_data.clear()
-            registrar_log("Sincronización de datos realizada")
-            st.success("¡Datos sincronizados exitosamente desde Supabase!")
+            registrar_log("Sincronización de Excel realizada")
+            st.success("¡Datos sincronizados exitosamente!")
             st.rerun()
        
         if st.button("🚪 Cerrar Sesión"):
             st.session_state["logged_in"] = False
             st.rerun()
 
+    # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
+    # --- CARGA DE DATOS LOCALES EXCEL / CSV ---
+    @st.cache_data
+    def cargar_datos():
+        df = pd.read_excel(RUTA_MAESTRA)
+        df.columns = df.columns.str.strip()
+         
+        # --- LIMPIEZA ROBUSTA DE MONTO ---
+        if 'Monto' in df.columns:
+            if df['Monto'].dtype == object or str(df['Monto'].dtype).startswith('string'):
+                df['Monto'] = (
+                    df['Monto'].astype(str)
+                    .str.replace('$', '', regex=False)
+                    .str.replace('.', '', regex=False)
+                    .str.replace(',', '.', regex=False)
+                    .str.strip()
+                )
+            df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
+        else:
+            df['Monto'] = 0.0
+        # ---------------------------------
+         
+        # Conversión de fechas
+        df['Fecha_Cotizacion'] = pd.to_datetime(df.get('Fecha_Cotizacion'), errors='coerce')
+        df['Fecha_OC'] = pd.to_datetime(df.get('Fecha_OC'), errors='coerce')
+        df['Fecha_Emision'] = pd.to_datetime(df.get('Fecha_Emision'), errors='coerce')
+        df['Fecha_GES'] = pd.to_datetime(df.get('Fecha_GES'), errors='coerce')
+        df['Fecha_Pago'] = pd.to_datetime(df.get('Fecha_Pago'), errors='coerce')
+        df['Fecha_Vencimiento'] = pd.to_datetime(df.get('Fecha_Vencimiento'), errors='coerce')
+         
+        # Sincronización automática del estado según la fecha de pago
+        if 'Fecha_Pago' in df.columns:
+            if 'Estado' not in df.columns:
+                df['Estado'] = 'PENDIENTE'
+            df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
+            df.to_excel(RUTA_MAESTRA, index=False)
+         
+        df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
+        df['Mes'] = df['Fecha_Pago'].dt.month
+
+        df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
+        df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
+        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+        df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
+         
+        if 'Factura' in df.columns:
+            df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
+            df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
+             
+        return df
+   
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
      
+    # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
     if 'Rol_Contacto' not in df_contactos.columns:
@@ -450,13 +395,12 @@ if check_password():
 
         st.divider()
 
-        if 'Fecha_Vencimiento' in df.columns and not df.empty:
+        if 'Fecha_Vencimiento' in df.columns:
             df['Semáforo'] = df.apply(calcular_semaforo_avanzado, axis=1)
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
            
         st.subheader("🚨 Alertas de Cobranza Urgentes")
-        df['Semáforo'] = df['Semáforo'].astype(str)
         df_criticos = df[df['Semáforo'].str.contains('Rojo|Amarillo', na=False)]
         if not df_criticos.empty:
             st.warning(f"Tienes **{len(df_criticos)} documentos** que requieren gestión de cobranza inmediata.")
@@ -471,7 +415,7 @@ if check_password():
         busqueda_global = st.text_input("Escribe una palabra clave (empresa, factura, servicio, planta):", key="global_search_input")
 
         if busqueda_global:
-            q = limpiar_texto_espanol(busqueda_global)
+            q = busqueda_global.upper()
             mask = (
                 df['Empresa'].str.contains(q, na=False) |
                 df['Planta'].str.contains(q, na=False) |
@@ -536,16 +480,8 @@ if check_password():
         for anio, col in zip([2025, 2026], [c1, c2]):
             with col:
                 st.write(f"### Mix Pagado {anio}")
-                df_anio_pie = df[df['Año'] == anio]
-                if not df_anio_pie.empty:
-                    df_pie_grouped = df_anio_pie.groupby('Grupo Servicio', as_index=False)['Monto'].sum()
-                    if not df_pie_grouped.empty and df_pie_grouped['Monto'].sum() > 0:
-                        fig = px.pie(df_pie_grouped, values='Monto', names='Grupo Servicio', hole=0.4)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info(f"Sin montos registrados para el año {anio}")
-                else:
-                    st.info(f"Sin registros para el año {anio}")
+                fig = px.pie(df[df['Año'] == anio], values='Monto', names='Grupo Servicio', hole=0.4)
+                st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("📉 Alertas Tempranas Riesgo de Abandono (Ingresos Reales)")
         if 'Año' in df.columns and 'Mes' in df.columns and 'Empresa' in df.columns:
@@ -582,19 +518,15 @@ if check_password():
     with tab2:
         container_filtros = st.container()
         with container_filtros:
-            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")     
+            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")      
             c_emp1, c_emp2 = st.columns(2)
             for anio, col in zip([2025, 2026], [c_emp1, c_emp2]):
                 with col:
                     st.write(f"### Ingresos Reales por Empresa {anio}")
                     df_anio = df[df['Año'] == anio]
                     if not df_anio.empty:
-                        df_emp_grouped = df_anio.groupby('Empresa', as_index=False)['Monto'].sum()
-                        if not df_emp_grouped.empty and df_emp_grouped['Monto'].sum() > 0:
-                            fig_emp = px.pie(df_emp_grouped, values='Monto', names='Empresa')
-                            st.plotly_chart(fig_emp, use_container_width=True)
-                        else:
-                            st.info(f"Sin montos en {anio}")
+                        fig_emp = px.pie(df_anio, values='Monto', names='Empresa')
+                        st.plotly_chart(fig_emp, use_container_width=True)
                     else:
                         st.info(f"No hay pagos registrados para {anio}")
             st.divider()
@@ -608,12 +540,8 @@ if check_password():
                     st.write(f"#### Año {anio}")
                     df_filtro = df[(df['Empresa'] == empresa_sel) & (df['Año'] == anio)]
                     if not df_filtro.empty:
-                        df_planta_grouped = df_filtro.groupby('Planta', as_index=False)['Monto'].sum()
-                        if not df_planta_grouped.empty and df_planta_grouped['Monto'].sum() > 0:
-                            fig_p = px.pie(df_planta_grouped, values='Monto', names='Planta')
-                            st.plotly_chart(fig_p, use_container_width=True)
-                        else:
-                            st.write(f"Sin montos en {anio}")
+                        fig_p = px.pie(df_filtro, values='Monto', names='Planta')
+                        st.plotly_chart(fig_p, use_container_width=True)
                     else:
                         st.write(f"Sin pagos en {anio}")
             st.divider()
@@ -657,19 +585,7 @@ if check_password():
     with tab3:
         st.subheader("📊 Análisis de Servicios Pagados por Empresa")
        
-        if 'Grupo Service' in df.columns:
-            col_serv = 'Grupo Service'
-        elif 'Grupo_Servicio' in df.columns:
-            col_serv = 'Grupo_Servicio'
-        elif 'Grupo Servicio' in df.columns:
-            col_serv = 'Grupo Servicio'
-        else:
-            df['Grupo Servicio'] = 'SIN SERVICIO'
-            col_serv = 'Grupo Servicio'
-
-        df_analisis = df.groupby(['Empresa', col_serv])['Monto'].sum().reset_index()
-        if col_serv != 'Grupo Servicio':
-            df_analisis = df_analisis.rename(columns={col_serv: 'Grupo Servicio'})
+        df_analisis = df.groupby(['Empresa', 'Grupo Servicio'])['Monto'].sum().reset_index()
        
         fig_bar = px.bar(
             df_analisis,
@@ -684,20 +600,12 @@ if check_password():
         st.info("💡 Tip: Analiza qué servicios generan mayor flujo de caja real por cliente.")
 
         st.subheader("📊 Análisis de Ventas Cruzadas (2026)")
-        df_2026 = df[df['Año'] == 2026].copy()
-        
-        col_serv_2026 = 'Grupo Servicio' if 'Grupo Servicio' in df_2026.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df_2026.columns else None)
-        if not col_serv_2026:
-            df_2026['Grupo Servicio'] = 'SIN SERVICIO'
-            col_serv_2026 = 'Grupo Servicio'
-        elif col_serv_2026 != 'Grupo Servicio':
-            df_2026['Grupo Servicio'] = df_2026[col_serv_2026]
-
+        df_2026 = df[df['Año'] == 2026]
         st.write("### Identificación de Venta Cruzada")
-        servicios_disponibles = df_2026['Grupo Servicio'].unique() if not df_2026.empty else ["SIN SERVICIO"]
-        servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles, key="select_servicio_target_cruzada")
+        servicios_disponibles = df['Grupo Servicio'].unique()
+        servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles)
              
-        clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique() if not df_2026.empty else []
+        clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique()
         todos_los_clientes = df_2026['Empresa'].unique()
              
         clientes_potenciales = [c for c in todos_los_clientes if c not in clientes_con_servicio]
@@ -780,19 +688,21 @@ if check_password():
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
-            with st.form("form_nueva_factura", clear_on_submit=True):
+            with st.form("form_nueva_factura"):
                 fc1, fc2 = st.columns(2)
                 with fc1:
                     n_factura = st.text_input("Número de Factura / Documento")
                     n_empresa_ins = st.text_input("Empresa")
                     n_planta_ins = st.text_input("Planta")
-                    
+                     
                     servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
                     n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
-                    
+                     
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
+                     
                     n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
-                    
+                     
+                    # Nuevos campos de ejecución
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
                     n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
 
@@ -802,52 +712,43 @@ if check_password():
                         n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
                     else:
                         n_f_pago = st.date_input("Fecha de Pago", value=None)
-                        
+                         
                     n_f_cot = st.date_input("Fecha Cotización", value=None)
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
                     n_f_emi = st.date_input("Fecha Emisión", value=None)
                     n_f_venc = st.date_input("Fecha Vencimiento", value=None)
-                    
+                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
-                
-                if st.form_submit_button("💾 Guardar y Sincronizar en la Nube"):
+               
+                if st.form_submit_button("💾 Guardar Nueva Factura"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
-                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
-                        
-                        fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
-                        anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
-                        mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
-
-                        nuevo_registro_supa = {
-                            "Factura": str(n_factura).strip(),
-                            "Empresa": limpiar_texto_espanol(n_empresa_ins),
-                            "Planta": limpiar_texto_espanol(n_planta_ins) if n_planta_ins else "SIN PLANTA",
-                            "Grupo_Servicio": limpiar_texto_espanol(n_grupo_servicio),
-                            "Servicio": limpiar_texto_espanol(n_servicio_detalle) if n_servicio_detalle else "SIN DETALLE",
-                            "Monto": float(n_monto),
-                            "dias_programados": float(n_dias_prog),
-                            "dias_reales": float(n_dias_real),
-                            "Fecha_Cotizacion": str(n_f_cot) if n_f_cot else None,
-                            "Fecha_OC": str(n_f_oc) if n_f_oc else None,
-                            "Fecha_Emision": str(n_f_emi) if n_f_emi else None,
-                            "Fecha_Vencimiento": str(n_f_venc) if n_f_venc else None,
-                            "Fecha_GES": str(n_f_ges) if n_f_ges else None,
-                            "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
-                            "Semaforo": "",
+                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else pd.NaT
+                         
+                        nueva_fila = pd.DataFrame([{
+                            "Factura": n_factura,
+                            "Empresa": n_empresa_ins.upper(),
+                            "Planta": n_planta_ins.upper() if n_planta_ins else "SIN PLANTA",
+                            "Grupo Servicio": n_grupo_servicio.upper(),
+                            "Servicio": n_servicio_detalle.upper() if n_servicio_detalle else "SIN DETALLE",
+                            "Monto": n_monto,
+                            "Dias_Programados": n_dias_prog,
+                            "Dias_Reales": n_dias_real,
+                            "Fecha_Cotizacion": pd.to_datetime(n_f_cot) if n_f_cot else pd.NaT,
+                            "Fecha_OC": pd.to_datetime(n_f_oc) if n_f_oc else pd.NaT,
+                            "Fecha_Emision": pd.to_datetime(n_f_emi) if n_f_emi else pd.NaT,
+                            "Fecha_Vencimiento": pd.to_datetime(n_f_venc) if n_f_venc else pd.NaT,
+                            "Fecha_GES": pd.to_datetime(n_f_ges) if n_f_ges else pd.NaT,
+                            "Fecha_Pago": fecha_pago_final,
+                            "Semáforo": "",
                             "Estado": n_estado_pago,
-                            "Requiere_GES": n_req_ges,
-                            "Año": anio_val,
-                            "Mes": mes_val
-                        }
-                        
-                        try:
-                            supabase.table("ingresos").upsert(nuevo_registro_supa).execute()
-                            st.cache_data.clear()
-                            st.success(f"¡Factura #{n_factura} guardada y sincronizada en Supabase exitosamente!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar en Supabase: {e}")
+                            "Requiere_GES": n_req_ges
+                        }])
+                        df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
+                        df_actualizado.to_excel(RUTA_MAESTRA, index=False)
+                        st.cache_data.clear()
+                        st.success("¡Factura creada y guardada con éxito en el Excel!")
+                        st.rerun()
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
@@ -866,29 +767,25 @@ if check_password():
         df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
           
         if not df.empty:
+            # 1. Menú desplegable preliminar para elegir la factura y ver su detalle completo
             st.write("### 🔍 Detalle Extendido por Factura")
             lista_facturas = df['Factura'].astype(str).tolist() if 'Factura' in df.columns else []
             if lista_facturas:
                 factura_seleccionada = st.selectbox("Selecciona una factura del historial para ver su información detallada:", lista_facturas)
                  
+                # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                  
-                d_prog = row_det.get('dias_programados', 0)
-                if pd.isna(d_prog):
-                    d_prog = row_det.get('Dias_Programados', 0)
-                d_prog = float(d_prog) if pd.notna(d_prog) else 0.0
-
-                d_real = row_det.get('dias_reales', 0)
-                if pd.isna(d_real):
-                    d_real = row_det.get('Dias_Reales', 0)
-                d_real = float(d_real) if pd.notna(d_real) else 0.0
-
+                # Cálculo de KPIs de eficiencia y cobro para el detalle
+                d_prog = row_det.get('Dias_Programados', 0)
+                d_real = row_det.get('Dias_Reales', 0)
                 desviacion = d_real - d_prog
                  
                 f_emi_val = row_det.get('Fecha_Emision')
                 f_pago_val = row_det.get('Fecha_Pago')
                 dias_cobro = (pd.to_datetime(f_pago_val) - pd.to_datetime(f_emi_val)).days if pd.notna(f_emi_val) and pd.notna(f_pago_val) else "N/A"
-                
+
+                # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
                      
@@ -920,6 +817,7 @@ if check_password():
 
             st.divider()
 
+            # 2. Tabla general limpia y simplificada (Número, Empresa, Planta, Monto, Estado)
             st.write("### 📋 Listado General Preliminar")
             columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
              
@@ -938,21 +836,15 @@ if check_password():
                 hide_index=True
             )
 
-            if st.button("💾 Guardar cambios de estados en la Nube"):
-                for idx, row in df_editado.iterrows():
-                    fac_num = str(row['Factura'])
-                    nuevo_est = row['Estado']
-                    try:
-                        supabase.table("ingresos").update({"Estado": nuevo_est}).eq("Factura", fac_num).execute()
-                    except Exception as e:
-                        st.error(f"Error al actualizar factura {fac_num}: {e}")
+            if st.button("💾 Guardar cambios de estados"):
+                df.update(df_editado[['Estado']])
+                df.to_excel(RUTA_MAESTRA, index=False)
                 st.cache_data.clear()
-                st.success("¡Estados actualizados exitosamente en Supabase!")
                 st.session_state["active_tab"] = 3
                 st.rerun()
 
         st.divider()
-          
+           
     with tab5:
         st.header("🔥 Embudo de Ventas y Métricas Comerciales")
 
@@ -961,12 +853,17 @@ if check_password():
 
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
        
+        # =====================================================================
+        # PANEL DE NUEVOS KPIS COMERCIALES
+        # =====================================================================
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
           
+        # 1. Tasa de Conversión (Ganados / Total no perdidos o total histórico)
         total_contactos = len(df_contactos)
         total_ganados = len(df_contactos[df_contactos['Estado'] == 'Ganado']) if total_contactos > 0 else 0
         tasa_conversion = (total_ganados / total_contactos * 100) if total_contactos > 0 else 0
           
+        # 2. Tasa de Retención y Recurrencia (Clientes con más de 1 servicio/factura registrada)
         if not df.empty and 'Empresa' in df.columns:
             conteo_por_empresa = df['Empresa'].value_counts()
             clientes_recurrentes = len(conteo_por_empresa[conteo_por_empresa > 1])
@@ -983,6 +880,8 @@ if check_password():
             pct_clientes_rec = 0.0
             pct_servicios_rec = 0.0
 
+        # 3. Tiempo de Conversión (Días promedio desde que se crea/contacta hasta pasar a Ganado, estimado con interacción o fecha de pago)
+        # 4. Tiempo de Respuesta (Promedio de días entre interacciones en el historial)
         promedio_dias_respuesta = 0.0
         if not df_interacciones.empty:
             try:
@@ -1004,6 +903,9 @@ if check_password():
 
         st.divider()
 
+        # =====================================================================
+        # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
+        # =====================================================================
         with st.expander("➕ Crear Nuevo Contacto", expanded=True):
             with st.form("form_contacto_unificado"):
                 c1, c2 = st.columns(2)
@@ -1028,9 +930,9 @@ if check_password():
                             supa_success = False
 
                         nueva = pd.DataFrame([{
-                            "Nombre": limpiar_texto_espanol(nombre),
-                            "Empresa": limpiar_texto_espanol(empresa),
-                            "Planta": limpiar_texto_espanol(planta),
+                            "Nombre": nombre,
+                            "Empresa": empresa,
+                            "Planta": planta,
                             "Correo": correo,
                             "Celular": celular,
                             "Estado": estado,
@@ -1123,7 +1025,7 @@ if check_password():
                                         "Nombre_Contacto": row['Nombre'],
                                         "Empresa": row['Empresa'],
                                         "Tipo": tipo_inter,
-                                        "Detalle": limpiar_texto_espanol(detalle_inter),
+                                        "Detalle": detalle_inter,
                                         "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
                                     }])
                                     pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
@@ -1144,14 +1046,14 @@ if check_password():
                         col_b1, col_b2 = st.columns(2)
                         with col_b1:
                             if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
-                                df_contactos.loc[idx, 'Bitacora'] = limpiar_texto_espanol(nueva_nota)
+                                df_contactos.loc[idx, 'Bitacora'] = nueva_nota
                                 df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
                                
                                 nueva_interaccion = pd.DataFrame([{
                                     "Nombre_Contacto": row['Nombre'],
                                     "Empresa": row['Empresa'],
                                     "Tipo": "Nota / Bitácora",
-                                    "Detalle": limpiar_texto_espanol(nueva_nota[:80] + "..."),
+                                    "Detalle": nueva_nota[:80] + "...",
                                     "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
                                 }])
                                 pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
@@ -1297,7 +1199,7 @@ if check_password():
                     nuevo_t = pd.DataFrame([{
                         "ID_Ticket": f"TKT-{len(df_tickets)+1:03d}",
                         "Empresa": t_empresa,
-                        "Asunto": limpiar_texto_espanol(t_asunto),
+                        "Asunto": t_asunto,
                         "Estado": t_estado,
                         "Prioridad": t_prioridad,
                         "Fecha": datetime.now().strftime("%Y-%m-%d")
@@ -1322,9 +1224,9 @@ if check_password():
                     n_valor = st.number_input("Valor", value=float(row['Valor']))
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
-                        df_contactos.loc[idx, 'Nombre'] = limpiar_texto_espanol(n_nombre)
-                        df_contactos.loc[idx, 'Empresa'] = limpiar_texto_espanol(n_empresa)
-                        df_contactos.loc[idx, 'Planta'] = limpiar_texto_espanol(n_planta)
+                        df_contactos.loc[idx, 'Nombre'] = n_nombre
+                        df_contactos.loc[idx, 'Empresa'] = n_empresa
+                        df_contactos.loc[idx, 'Planta'] = n_planta
                         df_contactos.loc[idx, 'Correo'] = n_correo
                         df_contactos.loc[idx, 'Celular'] = n_celular
                         df_contactos.loc[idx, 'Estado'] = n_estado
