@@ -46,18 +46,17 @@ def cargar_datos():
         ])
         
     df = pd.DataFrame(data)
+    
+    # Normalización total de columnas: quita espacios y maneja variantes de tildes/eñes
     df.columns = df.columns.str.strip()
     
-    # Mapeo flexible para reconocer cualquier variante incluyendo tildes, eñes y minúsculas
-    for col_posible in ['AÑO', 'Año', 'ano', 'anio', 'ANO']:
-        if col_posible in df.columns and 'Año' not in df.columns:
-            df = df.rename(columns={col_posible: 'Año'})
-            break
-            
-    for col_mes in ['Mes', 'MES', 'mes']:
-        if col_mes in df.columns and 'Mes' not in df.columns:
-            df = df.rename(columns={col_mes: 'Mes'})
-            break
+    # Mapeo flexible para reconocer variantes de la columna Año (Año, AÑO, Ano, anio, ano)
+    for col in df.columns:
+        col_limpia = col.lower().replace('á', 'a').replace('í', 'i').replace('ó', 'o').replace('é', 'e').replace('ú', 'u')
+        if col_limpia in ['ano', 'anio', 'agno']:
+            df = df.rename(columns={col: 'Año'})
+        elif col_limpia == 'mes':
+            df = df.rename(columns={col: 'Mes'})
     
     # Limpieza robusta de montos (remueve símbolos de moneda o espacios si los hubiera)
     if 'Monto' in df.columns:
@@ -71,7 +70,7 @@ def cargar_datos():
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión
+    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión si faltan
     if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
     else:
