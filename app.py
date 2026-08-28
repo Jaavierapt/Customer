@@ -829,15 +829,23 @@ if check_password():
                 # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                  
-                # Cálculo de KPIs de eficiencia y cobro para el detalle
-                d_prog = row_det.get('dias_programados', 0) if 'dias_programados' in row_det else row_det.get('Dias_Programados', 0)
-                d_real = row_det.get('dias_reales', 0) if 'dias_reales' in row_det else row_det.get('Dias_Reales', 0)
+                # Cálculo seguro de KPIs de eficiencia y cobro para el detalle evitando errores de nulos
+                d_prog = row_det.get('dias_programados', 0)
+                if pd.isna(d_prog):
+                    d_prog = row_det.get('Dias_Programados', 0)
+                d_prog = float(d_prog) if pd.notna(d_prog) else 0.0
+
+                d_real = row_det.get('dias_reales', 0)
+                if pd.isna(d_real):
+                    d_real = row_det.get('Dias_Reales', 0)
+                d_real = float(d_real) if pd.notna(d_real) else 0.0
+
                 desviacion = d_real - d_prog
                  
                 f_emi_val = row_det.get('Fecha_Emision')
                 f_pago_val = row_det.get('Fecha_Pago')
                 dias_cobro = (pd.to_datetime(f_pago_val) - pd.to_datetime(f_emi_val)).days if pd.notna(f_emi_val) and pd.notna(f_pago_val) else "N/A"
-
+                
                 # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
