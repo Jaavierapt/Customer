@@ -817,7 +817,7 @@ if check_password():
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         # =====================================================================
-        # NUEVO: OPCIÓN PARA EDITAR FACTURAS EXISTENTES
+        # OPCIÓN PARA EDITAR FACTURAS EXISTENTES (CORREGIDA Y COMPLETA)
         # =====================================================================
         with st.expander("✏️ Editar Factura Existente"):
             lista_facturas_edit = df['Factura'].astype(str).tolist() if not df.empty else []
@@ -830,7 +830,12 @@ if check_password():
                     with ec1:
                         ed_empresa = st.text_input("Empresa", value=row_edit.get('Empresa', ''))
                         ed_planta = st.text_input("Planta", value=row_edit.get('Planta', ''))
-                        ed_grupo = st.text_input("Grupo Servicio", value=row_edit.get('Grupo Servicio', ''))
+                        
+                        servicios_existentes_edit = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                        grupo_actual = row_edit.get('Grupo Servicio', 'SERVICIO GENERAL')
+                        idx_grupo = servicios_existentes_edit.index(grupo_actual) if grupo_actual in servicios_existentes_edit else 0
+                        ed_grupo = st.selectbox("Grupo Servicio", options=servicios_existentes_edit, index=idx_grupo, key="ed_grupo_serv_input")
+                        
                         ed_servicio = st.text_input("Servicio (Detalle)", value=row_edit.get('Servicio', ''))
                         ed_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0, value=float(row_edit.get('Monto', 0.0)))
                         
@@ -860,6 +865,9 @@ if check_password():
                         f_venc_old = pd.to_datetime(row_edit.get('Fecha_Vencimiento')) if pd.notna(row_edit.get('Fecha_Vencimiento')) else None
                         ed_f_venc = st.date_input("Fecha Vencimiento", value=f_venc_old.date() if f_venc_old else None)
 
+                        f_ges_old = pd.to_datetime(row_edit.get('Fecha_GES')) if pd.notna(row_edit.get('Fecha_GES')) else None
+                        ed_f_ges = st.date_input("Fecha GES (si aplica)", value=f_ges_old.date() if f_ges_old else None)
+
                         req_ges_old = row_edit.get('Requiere_GES', 'No')
                         ed_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], index=0 if req_ges_old == 'No' else 1)
 
@@ -882,6 +890,7 @@ if check_password():
                             "Fecha_OC": str(ed_f_oc) if ed_f_oc else None,
                             "Fecha_Emision": str(ed_f_emi) if ed_f_emi else None,
                             "Fecha_Vencimiento": str(ed_f_venc) if ed_f_venc else None,
+                            "Fecha_GES": str(ed_f_ges) if ed_f_ges else None,
                             "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
                             "Estado": ed_estado,
                             "Requiere_GES": ed_req_ges,
