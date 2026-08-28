@@ -31,6 +31,20 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+def limpiar_texto_espanol(texto):
+    """Elimina tildes y eñes para evitar errores de codificación en gráficos y PDF."""
+    if not isinstance(texto, str):
+        return str(texto)
+    return (
+        texto.upper()
+        .replace('Á', 'A')
+        .replace('É', 'E')
+        .replace('Í', 'I')
+        .replace('Ó', 'O')
+        .replace('Ú', 'U')
+        .replace('Ñ', 'N')
+    )
+
 def normalizar_columnas_df(df):
     """Normaliza de forma global las columnas para ignorar tildes, eñes, mayúsculas y espacios."""
     if df.empty:
@@ -40,10 +54,9 @@ def normalizar_columnas_df(df):
     renombres = {}
     
     for col in df.columns:
-        # Limpiar tildes, eñes y pasar a minúsculas para evaluar
         col_limpia = col.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
         
-        if col_limpia in ['ano', 'anio', 'agno', 'ano']:
+        if col_limpia in ['ano', 'anio', 'agno', 'año']:
             renombres[col] = 'Año'
         elif col_limpia == 'mes':
             renombres[col] = 'Mes'
@@ -62,7 +75,16 @@ def normalizar_columnas_df(df):
         elif col_limpia in ['estado', 'estado_pago']:
             renombres[col] = 'Estado'
             
-    return df.rename(columns=renombres)
+    df = df.rename(columns=renombres)
+    
+    for col_orig in df.columns:
+        col_std = col_orig.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
+        if col_std in ['ano', 'anio', 'agno', 'año'] and 'Año' not in df.columns:
+            df['Año'] = df[col_orig]
+        if col_std == 'mes' and 'Mes' not in df.columns:
+            df['Mes'] = df[col_orig]
+            
+    return df
 
 @st.cache_data(ttl=60)
 def cargar_datos():
@@ -81,19 +103,16 @@ def cargar_datos():
     df = pd.DataFrame(data)
     df = normalizar_columnas_df(df)
     
-    # Limpieza robusta de montos
     if 'Monto' in df.columns:
         df['Monto'] = df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
         df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
     else:
         df['Monto'] = 0.0
         
-    # Conversión segura de fechas
     for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación de Año y Mes si faltan o están vacíos
     if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
     else:
@@ -104,15 +123,15 @@ def cargar_datos():
     else:
         df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
 
-    df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
-    df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
+    df['Empresa'] = df['Empresa'].astype(str).str.strip().apply(limpiar_texto_espanol)
+    df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().apply(limpiar_texto_espanol)
     
     if 'Grupo Servicio' not in df.columns:
         df['Grupo Servicio'] = 'SIN SERVICIO'
     else:
-        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().apply(limpiar_texto_espanol)
         
-    df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
+    df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().apply(limpiar_texto_espanol)
     
     if 'Factura' in df.columns:
         df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
@@ -129,7 +148,7 @@ def cargar_contactos():
 def guardar_contacto(nombre, email, estado, telefono=""):
     """Inserta un nuevo contacto en la base de datos de Supabase."""
     nuevo_registro = {
-        "nombre": nombre,
+        "nombre": limpiar_texto_espanol(nombre),
         "email": email,
         "estado": estado,
         "telefono": telefono
@@ -223,9 +242,9 @@ def generar_pdf(df_original):
 
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}", ln=True)
-    pdf.cell(200, 6, txt=f"Total Clientes: {total_clientes}", ln=True)
+    pdf.cell(200, 6, txt=f"Total Clientes: {limpiar_texto_espanol(str(total_clientes))}", ln=True)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}", ln=True)
+    pdf.cell(200, 6, txt=f"KPIs Anuales (Segun Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}", ln=True)
     pdf.ln(5)
 
     if 'Mes' in df.columns and 'Año' in df.columns:
@@ -240,7 +259,7 @@ def generar_pdf(df_original):
         plt.xlabel("Mes", fontsize=9)
         plt.ylabel("Monto Pagado", fontsize=9)
         plt.xticks(rotation=0)
-        plt.legend(title="Año")
+        plt.legend(title="Ano")
         plt.tight_layout()
        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
@@ -270,7 +289,7 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Año {anio}", ln=True)
+        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Ano {anio}", ln=True)
         pdf.image(tmp_path, x=25, w=150)
         os.remove(tmp_path)
         pdf.ln(2)
@@ -279,7 +298,7 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Empresas ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in empresa_data.iterrows():
-            pdf.cell(90, 5, f"{row['Empresa']}: ${row['Monto']:,.0f}", border=1)
+            pdf.cell(90, 5, limpiar_texto_espanol(f"{row['Empresa']}: ${row['Monto']:,.0f}"), border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -291,11 +310,11 @@ def generar_pdf(df_original):
         total_monto = servicio_data['Monto'].sum()
         if total_monto > 0:
             etiquetas_leyenda = [
-                f"{row['Grupo Servicio']} ({row['Monto']/total_monto*100:.1f}%)"
+                limpiar_texto_espanol(f"{row['Grupo Servicio']} ({row['Monto']/total_monto*100:.1f}%)")
                 for _, row in servicio_data.iterrows()
             ]
         else:
-            etiquetas_leyenda = [f"{row['Grupo Servicio']} (0.0%)" for _, row in servicio_data.iterrows()]
+            etiquetas_leyenda = [limpiar_texto_espanol(f"{row['Grupo Servicio']} (0.0%)") for _, row in servicio_data.iterrows()]
        
         plt.figure(figsize=(6, 3.2))
         wedges, texts = plt.pie(
@@ -313,7 +332,7 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Año {anio}", ln=True)
+        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Ano {anio}", ln=True)
         pdf.image(tmp_path, x=20, w=160)
         os.remove(tmp_path)
         pdf.ln(2)
@@ -322,7 +341,7 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Mix de Servicios ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in servicio_data.iterrows():
-            pdf.cell(90, 5, f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}", border=1)
+            pdf.cell(90, 5, limpiar_texto_espanol(f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}"), border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -363,14 +382,13 @@ if check_password():
 
     def registrar_log(accion):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.session_state["log_actividad"].insert(0, f"[{timestamp}] - {st.session_state.get('user_email', 'Sistema')}: {accion}")
+        st.session_state["log_actividad"].insert(0, f"[{timestamp}] - {st.session_state.get('user_email', 'Sistema')}: {limpiar_texto_espanol(accion)}")
 
     with st.sidebar:
         st.write(f"**Usuario:** {st.session_state['user_email']}")
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        # Descarga de reporte PDF conectada directamente a Supabase
         if st.button("📥 Descargar Reporte PDF"):
             df_pdf = cargar_datos()
             st.download_button("📥 Confirmar Descarga PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
@@ -385,13 +403,11 @@ if check_password():
             st.session_state["logged_in"] = False
             st.rerun()
 
-    # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
      
-    # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
     if 'Rol_Contacto' not in df_contactos.columns:
@@ -455,7 +471,7 @@ if check_password():
         busqueda_global = st.text_input("Escribe una palabra clave (empresa, factura, servicio, planta):", key="global_search_input")
 
         if busqueda_global:
-            q = busqueda_global.upper()
+            q = limpiar_texto_espanol(busqueda_global)
             mask = (
                 df['Empresa'].str.contains(q, na=False) |
                 df['Planta'].str.contains(q, na=False) |
@@ -799,17 +815,16 @@ if check_password():
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
-                        # Cálculo seguro de Año y Mes basados en la fecha de pago o emisión
                         fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
                         anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
                         mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
 
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
-                            "Empresa": n_empresa_ins.strip().upper(),
-                            "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
-                            "Grupo_Servicio": n_grupo_servicio.upper(),
-                            "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
+                            "Empresa": limpiar_texto_espanol(n_empresa_ins),
+                            "Planta": limpiar_texto_espanol(n_planta_ins) if n_planta_ins else "SIN PLANTA",
+                            "Grupo_Servicio": limpiar_texto_espanol(n_grupo_servicio),
+                            "Servicio": limpiar_texto_espanol(n_servicio_detalle) if n_servicio_detalle else "SIN DETALLE",
                             "Monto": float(n_monto),
                             "dias_programados": float(n_dias_prog),
                             "dias_reales": float(n_dias_real),
@@ -822,7 +837,7 @@ if check_password():
                             "Semaforo": "",
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
-                            "Ano": anio_val,
+                            "Año": anio_val,
                             "Mes": mes_val
                         }
                         
@@ -851,16 +866,13 @@ if check_password():
         df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
           
         if not df.empty:
-            # 1. Menú desplegable preliminar para elegir la factura y ver su detalle completo
             st.write("### 🔍 Detalle Extendido por Factura")
             lista_facturas = df['Factura'].astype(str).tolist() if 'Factura' in df.columns else []
             if lista_facturas:
                 factura_seleccionada = st.selectbox("Selecciona una factura del historial para ver su información detallada:", lista_facturas)
                  
-                # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                  
-                # Cálculo de KPIs de eficiencia y cobro para el detalle evitando errores de nulos
                 d_prog = row_det.get('dias_programados', 0)
                 if pd.isna(d_prog):
                     d_prog = row_det.get('Dias_Programados', 0)
@@ -877,7 +889,6 @@ if check_password():
                 f_pago_val = row_det.get('Fecha_Pago')
                 dias_cobro = (pd.to_datetime(f_pago_val) - pd.to_datetime(f_emi_val)).days if pd.notna(f_emi_val) and pd.notna(f_pago_val) else "N/A"
                 
-                # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
                      
@@ -909,7 +920,6 @@ if check_password():
 
             st.divider()
 
-            # 2. Tabla general limpia y simplificada (Número, Empresa, Planta, Monto, Estado)
             st.write("### 📋 Listado General Preliminar")
             columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
              
@@ -951,17 +961,12 @@ if check_password():
 
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
        
-        # =====================================================================
-        # PANEL DE NUEVOS KPIS COMERCIALES
-        # =====================================================================
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
           
-        # 1. Tasa de Conversión (Ganados / Total no perdidos o total histórico)
         total_contactos = len(df_contactos)
         total_ganados = len(df_contactos[df_contactos['Estado'] == 'Ganado']) if total_contactos > 0 else 0
         tasa_conversion = (total_ganados / total_contactos * 100) if total_contactos > 0 else 0
           
-        # 2. Tasa de Retención y Recurrencia (Clientes con más de 1 servicio/factura registrada)
         if not df.empty and 'Empresa' in df.columns:
             conteo_por_empresa = df['Empresa'].value_counts()
             clientes_recurrentes = len(conteo_por_empresa[conteo_por_empresa > 1])
@@ -978,8 +983,6 @@ if check_password():
             pct_clientes_rec = 0.0
             pct_servicios_rec = 0.0
 
-        # 3. Tiempo de Conversión (Días promedio desde que se crea/contacta hasta pasar a Ganado, estimado con interacción o fecha de pago)
-        # 4. Tiempo de Respuesta (Promedio de días entre interacciones en el historial)
         promedio_dias_respuesta = 0.0
         if not df_interacciones.empty:
             try:
@@ -1001,9 +1004,6 @@ if check_password():
 
         st.divider()
 
-        # =====================================================================
-        # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
-        # =====================================================================
         with st.expander("➕ Crear Nuevo Contacto", expanded=True):
             with st.form("form_contacto_unificado"):
                 c1, c2 = st.columns(2)
@@ -1028,9 +1028,9 @@ if check_password():
                             supa_success = False
 
                         nueva = pd.DataFrame([{
-                            "Nombre": nombre,
-                            "Empresa": empresa,
-                            "Planta": planta,
+                            "Nombre": limpiar_texto_espanol(nombre),
+                            "Empresa": limpiar_texto_espanol(empresa),
+                            "Planta": limpiar_texto_espanol(planta),
                             "Correo": correo,
                             "Celular": celular,
                             "Estado": estado,
@@ -1123,7 +1123,7 @@ if check_password():
                                         "Nombre_Contacto": row['Nombre'],
                                         "Empresa": row['Empresa'],
                                         "Tipo": tipo_inter,
-                                        "Detalle": detalle_inter,
+                                        "Detalle": limpiar_texto_espanol(detalle_inter),
                                         "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
                                     }])
                                     pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
@@ -1144,14 +1144,14 @@ if check_password():
                         col_b1, col_b2 = st.columns(2)
                         with col_b1:
                             if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
-                                df_contactos.loc[idx, 'Bitacora'] = nueva_nota
+                                df_contactos.loc[idx, 'Bitacora'] = limpiar_texto_espanol(nueva_nota)
                                 df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
                                
                                 nueva_interaccion = pd.DataFrame([{
                                     "Nombre_Contacto": row['Nombre'],
                                     "Empresa": row['Empresa'],
                                     "Tipo": "Nota / Bitácora",
-                                    "Detalle": nueva_nota[:80] + "...",
+                                    "Detalle": limpiar_texto_espanol(nueva_nota[:80] + "..."),
                                     "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
                                 }])
                                 pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
@@ -1297,7 +1297,7 @@ if check_password():
                     nuevo_t = pd.DataFrame([{
                         "ID_Ticket": f"TKT-{len(df_tickets)+1:03d}",
                         "Empresa": t_empresa,
-                        "Asunto": t_asunto,
+                        "Asunto": limpiar_texto_espanol(t_asunto),
                         "Estado": t_estado,
                         "Prioridad": t_prioridad,
                         "Fecha": datetime.now().strftime("%Y-%m-%d")
@@ -1322,9 +1322,9 @@ if check_password():
                     n_valor = st.number_input("Valor", value=float(row['Valor']))
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
-                        df_contactos.loc[idx, 'Nombre'] = n_nombre
-                        df_contactos.loc[idx, 'Empresa'] = n_empresa
-                        df_contactos.loc[idx, 'Planta'] = n_planta
+                        df_contactos.loc[idx, 'Nombre'] = limpiar_texto_espanol(n_nombre)
+                        df_contactos.loc[idx, 'Empresa'] = limpiar_texto_espanol(n_empresa)
+                        df_contactos.loc[idx, 'Planta'] = limpiar_texto_espanol(n_planta)
                         df_contactos.loc[idx, 'Correo'] = n_correo
                         df_contactos.loc[idx, 'Celular'] = n_celular
                         df_contactos.loc[idx, 'Estado'] = n_estado
