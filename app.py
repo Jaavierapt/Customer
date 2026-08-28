@@ -457,7 +457,7 @@ if check_password():
 
         st.subheader("🤖 Asistente de Inteligencia Comercial")
        
-        user_query = st.text_input("Pregúntale algo sobre tus ingresos or tendencias:", key="input_ia")
+        user_query = st.text_input("Pregúntale algo sobre tus ingresos o tendencias:", key="input_ia")
         if st.button("Consultar IA"):
             if user_query:
                 with st.spinner("Procesando consulta local..."):
@@ -547,7 +547,7 @@ if check_password():
     with tab2:
         container_filtros = st.container()
         with container_filtros:
-            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")      
+            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")     
             c_emp1, c_emp2 = st.columns(2)
             for anio, col in zip([2025, 2026], [c_emp1, c_emp2]):
                 with col:
@@ -650,7 +650,7 @@ if check_password():
 
         st.subheader("📊 Análisis de Ventas Cruzadas (2026)")
         df_2026 = df[df['Año'] == 2026].copy()
-         
+        
         col_serv_2026 = 'Grupo Servicio' if 'Grupo Servicio' in df_2026.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df_2026.columns else None)
         if not col_serv_2026:
             df_2026['Grupo Servicio'] = 'SIN SERVICIO'
@@ -775,11 +775,12 @@ if check_password():
                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
-               
+                
                 if st.form_submit_button("💾 Guardar y Sincronizar en la Nube"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
+                        # Cálculo seguro de Año y Mes basados en la fecha de pago o emisión
                         fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
                         anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
                         mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
@@ -815,98 +816,6 @@ if check_password():
                             st.error(f"Error al guardar en Supabase: {e}")
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
-
-        # =====================================================================
-        # OPCIÓN PARA EDITAR FACTURAS EXISTENTES (CORREGIDA Y COMPLETA)
-        # =====================================================================
-        with st.expander("✏️ Editar Factura Existente"):
-            lista_facturas_edit = df['Factura'].astype(str).tolist() if not df.empty else []
-            if lista_facturas_edit:
-                factura_a_editar = st.selectbox("Selecciona la Factura a modificar:", lista_facturas_edit, key="select_factura_editar")
-                row_edit = df[df['Factura'].astype(str) == str(factura_a_editar)].iloc[0]
-
-                with st.form("form_editar_factura"):
-                    ec1, ec2 = st.columns(2)
-                    with ec1:
-                        ed_empresa = st.text_input("Empresa", value=row_edit.get('Empresa', ''))
-                        ed_planta = st.text_input("Planta", value=row_edit.get('Planta', ''))
-                        
-                        servicios_existentes_edit = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
-                        grupo_actual = row_edit.get('Grupo Servicio', 'SERVICIO GENERAL')
-                        idx_grupo = servicios_existentes_edit.index(grupo_actual) if grupo_actual in servicios_existentes_edit else 0
-                        ed_grupo = st.selectbox("Grupo Servicio", options=servicios_existentes_edit, index=idx_grupo, key="ed_grupo_serv_input")
-                        
-                        ed_servicio = st.text_input("Servicio (Detalle)", value=row_edit.get('Servicio', ''))
-                        ed_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0, value=float(row_edit.get('Monto', 0.0)))
-                        
-                        d_prog_val = row_edit.get('dias_programados', row_edit.get('Dias_Programados', 0.0))
-                        ed_dias_prog = st.number_input("Días Programados", min_value=0.0, step=1.0, value=float(d_prog_val) if pd.notna(d_prog_val) else 0.0)
-                        
-                        d_real_val = row_edit.get('dias_reales', row_edit.get('Dias_Reales', 0.0))
-                        ed_dias_real = st.number_input("Días Reales", min_value=0.0, step=1.0, value=float(d_real_val) if pd.notna(d_real_val) else 0.0)
-
-                    with ec2:
-                        est_actual = row_edit.get('Estado', 'PENDIENTE')
-                        idx_est = ["PENDIENTE", "Pagado", "Esperando OC", "Servicio Ejecutado"].index(est_actual) if est_actual in ["PENDIENTE", "Pagado", "Esperando OC", "Servicio Ejecutado"] else 0
-                        ed_estado = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado", "Esperando OC", "Servicio Ejecutado"], index=idx_est)
-                        
-                        f_pago_old = pd.to_datetime(row_edit.get('Fecha_Pago')) if pd.notna(row_edit.get('Fecha_Pago')) else None
-                        ed_f_pago = st.date_input("Fecha de Pago", value=f_pago_old.date() if f_pago_old else None)
-
-                        f_cot_old = pd.to_datetime(row_edit.get('Fecha_Cotizacion')) if pd.notna(row_edit.get('Fecha_Cotizacion')) else None
-                        ed_f_cot = st.date_input("Fecha Cotización", value=f_cot_old.date() if f_cot_old else None)
-
-                        f_oc_old = pd.to_datetime(row_edit.get('Fecha_OC')) if pd.notna(row_edit.get('Fecha_OC')) else None
-                        ed_f_oc = st.date_input("Fecha Orden de Compra", value=f_oc_old.date() if f_oc_old else None)
-
-                        f_emi_old = pd.to_datetime(row_edit.get('Fecha_Emision')) if pd.notna(row_edit.get('Fecha_Emision')) else None
-                        ed_f_emi = st.date_input("Fecha Emisión", value=f_emi_old.date() if f_emi_old else None)
-
-                        f_venc_old = pd.to_datetime(row_edit.get('Fecha_Vencimiento')) if pd.notna(row_edit.get('Fecha_Vencimiento')) else None
-                        ed_f_venc = st.date_input("Fecha Vencimiento", value=f_venc_old.date() if f_venc_old else None)
-
-                        f_ges_old = pd.to_datetime(row_edit.get('Fecha_GES')) if pd.notna(row_edit.get('Fecha_GES')) else None
-                        ed_f_ges = st.date_input("Fecha GES (si aplica)", value=f_ges_old.date() if f_ges_old else None)
-
-                        req_ges_old = row_edit.get('Requiere_GES', 'No')
-                        ed_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], index=0 if req_ges_old == 'No' else 1)
-
-                    if st.form_submit_button("💾 Actualizar Factura en la Nube"):
-                        fecha_pago_final = pd.to_datetime(ed_f_pago) if (ed_estado == "Pagado" and ed_f_pago) else None
-                        fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(ed_f_emi) if ed_f_emi else None)
-                        anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
-                        mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
-
-                        registro_actualizado = {
-                            "Factura": str(factura_a_editar).strip(),
-                            "Empresa": ed_empresa.strip().upper(),
-                            "Planta": ed_planta.strip().upper() if ed_planta else "SIN PLANTA",
-                            "Grupo_Servicio": ed_grupo.upper(),
-                            "Servicio": ed_servicio.strip().upper() if ed_servicio else "SIN DETALLE",
-                            "Monto": float(ed_monto),
-                            "dias_programados": float(ed_dias_prog),
-                            "dias_reales": float(ed_dias_real),
-                            "Fecha_Cotizacion": str(ed_f_cot) if ed_f_cot else None,
-                            "Fecha_OC": str(ed_f_oc) if ed_f_oc else None,
-                            "Fecha_Emision": str(ed_f_emi) if ed_f_emi else None,
-                            "Fecha_Vencimiento": str(ed_f_venc) if ed_f_venc else None,
-                            "Fecha_GES": str(ed_f_ges) if ed_f_ges else None,
-                            "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
-                            "Estado": ed_estado,
-                            "Requiere_GES": ed_req_ges,
-                            "Ano": anio_val,
-                            "Mes": mes_val
-                        }
-
-                        try:
-                            supabase.table("ingresos").upsert(registro_actualizado).execute()
-                            st.cache_data.clear()
-                            st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente en Supabase!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al actualizar en Supabase: {e}")
-            else:
-                st.info("No hay facturas disponibles para editar.")
 
         st.divider()
 
@@ -992,7 +901,7 @@ if check_password():
                     required=True,
                 )
             }
-            
+           
             df_editado = st.data_editor(
                 df[columnas_esenciales],
                 column_config=configuracion_columnas,
