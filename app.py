@@ -31,34 +31,57 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+def normalizar_columnas_df(df):
+    """Normaliza de forma global las columnas para ignorar tildes, eñes, mayúsculas y espacios."""
+    if df.empty:
+        return df
+    
+    df.columns = df.columns.str.strip()
+    renombres = {}
+    
+    for col in df.columns:
+        # Limpiar tildes, eñes y pasar a minúsculas para evaluar
+        col_limpia = col.lower().replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
+        
+        if col_limpia in ['ano', 'anio', 'agno', 'ano']:
+            renombres[col] = 'Año'
+        elif col_limpia == 'mes':
+            renombres[col] = 'Mes'
+        elif col_limpia in ['grupo_servicio', 'grupo servicio', 'gruposervicio']:
+            renombres[col] = 'Grupo Servicio'
+        elif col_limpia in ['factura', 'n_factura', 'num_factura']:
+            renombres[col] = 'Factura'
+        elif col_limpia == 'empresa':
+            renombres[col] = 'Empresa'
+        elif col_limpia == 'planta':
+            renombres[col] = 'Planta'
+        elif col_limpia == 'servicio':
+            renombres[col] = 'Servicio'
+        elif col_limpia == 'monto':
+            renombres[col] = 'Monto'
+        elif col_limpia in ['estado', 'estado_pago']:
+            renombres[col] = 'Estado'
+            
+    return df.rename(columns=renombres)
+
 @st.cache_data(ttl=60)
 def cargar_datos():
-    """Consulta todos los registros de la tabla 'ingresos' en Supabase y los depura con seguridad."""
+    """Consulta todos los registros de la tabla 'ingresos' en Supabase y los normaliza globalmente."""
     response = supabase.table("ingresos").select("*").execute()
     data = response.data
     
     if not data:
         return pd.DataFrame(columns=[
-            "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
+            "Factura", "Empresa", "Planta", "Grupo Servicio", "Servicio", 
             "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
             "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
             "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
         ])
         
     df = pd.DataFrame(data)
+    df = normalizar_columnas_df(df)
     
-    # Normalización total de columnas: quita espacios y maneja variantes de tildes/eñes
-    df.columns = df.columns.str.strip()
-    
-    # Mapeo flexible para reconocer variantes de la columna Año (Año, AÑO, Ano, anio, ano)
-    for col in df.columns:
-        col_limpia = col.lower().replace('á', 'a').replace('í', 'i').replace('ó', 'o').replace('é', 'e').replace('ú', 'u')
-        if col_limpia in ['ano', 'anio', 'agno']:
-            df = df.rename(columns={col: 'Año'})
-        elif col_limpia == 'mes':
-            df = df.rename(columns={col: 'Mes'})
-    
-    # Limpieza robusta de montos (remueve símbolos de moneda o espacios si los hubiera)
+    # Limpieza robusta de montos
     if 'Monto' in df.columns:
         df['Monto'] = df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
         df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
@@ -70,13 +93,13 @@ def cargar_datos():
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión si faltan
+    # Asignación de Año y Mes si faltan o están vacíos
     if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
     else:
         df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
 
-    if 'Mes' not in df.columns or df['Mes'].isna().all():
+    if 'Mes' not in df.columns or df['Mes'].isna().all() or (df['Mes'] == 0).all():
         df['Mes'] = df['Fecha_Pago'].dt.month.fillna(df['Fecha_Emision'].dt.month).fillna(0).astype(int)
     else:
         df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
@@ -84,13 +107,10 @@ def cargar_datos():
     df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
     df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
     
-    # Sincronizar nombres de columnas de servicio
-    if 'Grupo_Servicio' in df.columns:
-        df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
-    elif 'Grupo Servicio' in df.columns:
-        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
-    else:
+    if 'Grupo Servicio' not in df.columns:
         df['Grupo Servicio'] = 'SIN SERVICIO'
+    else:
+        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
         
     df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
     
