@@ -48,9 +48,16 @@ def cargar_datos():
     df = pd.DataFrame(data)
     df.columns = df.columns.str.strip()
     
-    # Mapeo flexible por si la base de datos devuelve "Ano" en lugar de "Año"
-    if 'Ano' in df.columns and 'Año' not in df.columns:
-        df = df.rename(columns={'Ano': 'Año'})
+    # Mapeo flexible para reconocer cualquier variante incluyendo tildes, eñes y minúsculas
+    for col_posible in ['AÑO', 'Año', 'ano', 'anio', 'ANO']:
+        if col_posible in df.columns and 'Año' not in df.columns:
+            df = df.rename(columns={col_posible: 'Año'})
+            break
+            
+    for col_mes in ['Mes', 'MES', 'mes']:
+        if col_mes in df.columns and 'Mes' not in df.columns:
+            df = df.rename(columns={col_mes: 'Mes'})
+            break
     
     # Limpieza robusta de montos (remueve símbolos de moneda o espacios si los hubiera)
     if 'Monto' in df.columns:
@@ -773,6 +780,11 @@ if check_password():
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
+                        # Cálculo seguro de Año y Mes basados en la fecha de pago o emisión
+                        fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
+                        anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
+                        mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
+
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
                             "Empresa": n_empresa_ins.strip().upper(),
@@ -791,8 +803,8 @@ if check_password():
                             "Semaforo": "",
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
-                            "Año": pd.to_datetime(fecha_pago_final).year if fecha_pago_final else None,
-                            "Mes": pd.to_datetime(fecha_pago_final).month if fecha_pago_final else None
+                            "AÑO": anio_val,
+                            "Mes": mes_val
                         }
                         
                         try:
@@ -829,7 +841,7 @@ if check_password():
                 # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                  
-                # Cálculo seguro de KPIs de eficiencia y cobro para el detalle evitando errores de nulos
+                # Cálculo de KPIs de eficiencia y cobro para el detalle evitando errores de nulos
                 d_prog = row_det.get('dias_programados', 0)
                 if pd.isna(d_prog):
                     d_prog = row_det.get('Dias_Programados', 0)
