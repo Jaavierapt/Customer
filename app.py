@@ -847,12 +847,16 @@ if check_password():
                     row_edit = df[df['Factura'].astype(str) == str(factura_a_editar)].iloc[0]
                     
                     def safe_date_val(val):
-                        if pd.notna(val) and str(val).strip() != "" and str(val) != "None":
+                        if pd.notna(val) and str(val).strip() != "" and str(val) != "None" and str(val) != "NaT":
                             try:
                                 return pd.to_datetime(val).date()
                             except:
                                 return None
                         return None
+
+                    def safe_date_str(val):
+                        d = safe_date_val(val)
+                        return str(d) if d else None
 
                     with st.form("form_editar_factura"):
                         e_col1, e_col2 = st.columns(2)
@@ -895,10 +899,22 @@ if check_password():
                             e_f_pago = st.date_input("Fecha de Pago", value=safe_date_val(row_edit.get('Fecha_Pago')), key="e_fpago")
 
                         if st.form_submit_button("💾 Actualizar Factura en Supabase"):
-                            fecha_pago_final = pd.to_datetime(e_f_pago) if e_f_pago else None
-                            fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(e_f_emi) if e_f_emi else None)
-                            anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
-                            mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
+                            # Preservación robusta de datos: si una fecha no cambia o está vacía, se conserva la de la BD
+                            f_cot_final = str(e_f_cot) if e_f_cot else safe_date_str(row_edit.get('Fecha_Cotizacion'))
+                            f_oc_final = str(e_f_oc) if e_f_oc else safe_date_str(row_edit.get('Fecha_OC'))
+                            f_emi_final = str(e_f_emi) if e_f_emi else safe_date_str(row_edit.get('Fecha_Emision'))
+                            f_venc_final = str(e_f_venc) if e_f_venc else safe_date_str(row_edit.get('Fecha_Vencimiento'))
+                            f_ges_final = str(e_f_ges) if e_f_ges else safe_date_str(row_edit.get('Fecha_GES'))
+                            f_pago_final = str(e_f_pago) if e_f_pago else safe_date_str(row_edit.get('Fecha_Pago'))
+
+                            # Recálculo seguro de Año y Mes sin perder la información existente
+                            ref_dt = pd.to_datetime(f_pago_final) if f_pago_final else (pd.to_datetime(f_emi_final) if f_emi_final else None)
+                            if pd.notna(ref_dt):
+                                anio_val = int(ref_dt.year)
+                                mes_val = int(ref_dt.month)
+                            else:
+                                anio_val = int(row_edit.get('Año', 0)) if pd.notna(row_edit.get('Año')) else None
+                                mes_val = int(row_edit.get('Mes', 0)) if pd.notna(row_edit.get('Mes')) else None
 
                             registro_actualizado = {
                                 "Empresa": e_empresa.strip().upper(),
@@ -908,12 +924,12 @@ if check_password():
                                 "Monto": int(e_monto),
                                 "dias_programados": float(e_dias_prog),
                                 "dias_reales": float(e_dias_real),
-                                "Fecha_Cotizacion": str(e_f_cot) if e_f_cot else None,
-                                "Fecha_OC": str(e_f_oc) if e_f_oc else None,
-                                "Fecha_Emision": str(e_f_emi) if e_f_emi else None,
-                                "Fecha_Vencimiento": str(e_f_venc) if e_f_venc else None,
-                                "Fecha_GES": str(e_f_ges) if e_f_ges else None,
-                                "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
+                                "Fecha_Cotizacion": f_cot_final,
+                                "Fecha_OC": f_oc_final,
+                                "Fecha_Emision": f_emi_final,
+                                "Fecha_Vencimiento": f_venc_final,
+                                "Fecha_GES": f_ges_final,
+                                "Fecha_Pago": f_pago_final,
                                 "Estado": e_estado_pago,
                                 "Requiere_GES": e_req_ges,
                                 "Ano": anio_val,
