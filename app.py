@@ -59,12 +59,26 @@ def cargar_datos():
             df = df.rename(columns={col_mes: 'Mes'})
             break
     
-    # Limpieza robusta de montos (remueve símbolos de moneda o espacios si los hubiera)
+    # Limpieza robusta de montos evitando duplicación/multiplicación por eliminación accidental de puntos
     if 'Monto' in df.columns:
-        df['Monto'] = df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-        df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0.0)
+        def limpiar_monto_entero(val):
+            if pd.isna(val) or val is None:
+                return 0
+            if isinstance(val, (int, float)):
+                return int(round(float(val)))
+            s_val = str(val).strip().replace('$', '')
+            if '.' in s_val and ',' in s_val:
+                s_val = s_val.replace('.', '').replace(',', '.')
+            elif ',' in s_val:
+                s_val = s_val.replace(',', '.')
+            try:
+                return int(round(float(s_val)))
+            except:
+                return 0
+
+        df['Monto'] = df['Monto'].apply(limpiar_monto_entero).astype('int64')
     else:
-        df['Monto'] = 0.0
+        df['Monto'] = 0
         
     # Conversión segura de fechas
     for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
@@ -197,16 +211,16 @@ def generar_pdf(df_original):
     pdf.cell(200, 10, txt="Reporte Ejecutivo CRM Itelcam (Ingresos Reales por Pago)", ln=True, align='C')
     pdf.ln(5)
    
-    ingresos_totales = df['Monto'].sum()
+    ingresos_totales = int(df['Monto'].sum())
     total_clientes = df['Empresa'].nunique() if 'Empresa' in df.columns else len(df)
-    ingresos_2025 = df[df['Año'] == 2025]['Monto'].sum() if 'Año' in df.columns else 0
-    ingresos_2026 = df[df['Año'] == 2026]['Monto'].sum() if 'Año' in df.columns else 0
+    ingresos_2025 = int(df[df['Año'] == 2025]['Monto'].sum()) if 'Año' in df.columns else 0
+    ingresos_2026 = int(df[df['Año'] == 2026]['Monto'].sum()) if 'Año' in df.columns else 0
 
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}", ln=True)
+    pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}".replace(",", "."), ln=True)
     pdf.cell(200, 6, txt=f"Total Clientes: {total_clientes}", ln=True)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}", ln=True)
+    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}".replace(",", "."), ln=True)
     pdf.ln(5)
 
     if 'Mes' in df.columns and 'Año' in df.columns:
@@ -260,7 +274,8 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Empresas ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in empresa_data.iterrows():
-            pdf.cell(90, 5, f"{row['Empresa']}: ${row['Monto']:,.0f}", border=1)
+            monto_str = f"${int(row['Monto']):,.0f}".replace(",", ".")
+            pdf.cell(90, 5, f"{row['Empresa']}: {monto_str}", border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -303,7 +318,8 @@ def generar_pdf(df_original):
         pdf.cell(200, 5, f"Detalle Mix de Servicios ({anio})", ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in servicio_data.iterrows():
-            pdf.cell(90, 5, f"{row['Grupo Servicio']}: ${row['Monto']:,.0f}", border=1)
+            monto_str = f"${int(row['Monto']):,.0f}".replace(",", ".")
+            pdf.cell(90, 5, f"{row['Grupo Servicio']}: {monto_str}", border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -465,7 +481,7 @@ if check_password():
                     if "ingresos" in query_lower or "total" in query_lower or "cuánto" in query_lower:
                         total_2026_val = df[df['Año'] == 2026]['Monto'].sum()
                         total_2025_val = df[df['Año'] == 2025]['Monto'].sum()
-                        respuesta_ia = f"📊 **Análisis Local (Por Fecha de Pago):** Los ingresos reales pagados durante el año 2026 ascienden a ${total_2026_val:,.0f}, comparados con ${total_2025_val:,.0f} en 2025."
+                        respuesta_ia = f"📊 **Análisis Local (Por Fecha de Pago):** Los ingresos reales pagados durante el año 2026 ascienden a ${total_2026_val:,.0f}".replace(",", ".") + f", comparados con ${total_2025_val:,.0f}".replace(",", ".") + " en 2025."
                     elif "cliente" in query_lower or "empresa" in query_lower:
                         top_empresa = df[df['Año'] == 2026].groupby('Empresa')['Monto'].sum().idxmax() if not df[df['Año'] == 2026].empty else "N/A"
                         respuesta_ia = f"🏢 **Análisis Local:** La empresa con mayor aportación de ingresos reales (pagados) durante el 2026 es **{top_empresa}**."
@@ -478,16 +494,16 @@ if check_password():
                 st.warning("Por favor, escribe una pregunta.")
 
         st.subheader("📊 Resumen Ejecutivo de Ingresos Reales (KPIs)")
-        total_2026 = df[df['Año'] == 2026]['Monto'].sum()
-        total_2025 = df[df['Año'] == 2025]['Monto'].sum()
+        total_2026 = int(df[df['Año'] == 2026]['Monto'].sum())
+        total_2025 = int(df[df['Año'] == 2025]['Monto'].sum())
         variacion = ((total_2026 - total_2025) / total_2025 * 100) if total_2025 != 0 else 0
-        ticket_promedio = df[df['Año'] == 2026]['Monto'].mean() if not df[df['Año'] == 2026].empty else 0
+        ticket_promedio = int(round(df[df['Año'] == 2026]['Monto'].mean())) if not df[df['Año'] == 2026].empty else 0
         top_cliente = df[df['Año'] == 2026].groupby('Empresa')['Monto'].sum().idxmax() if not df[df['Año'] == 2026].empty else "N/A"
           
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Ingresos Pagados 2026", f"${total_2026:,.0f}")
+        k1.metric("Ingresos Pagados 2026", f"${total_2026:,.0f}".replace(",", "."))
         k2.metric("Crecimiento vs 2025", f"{variacion:,.1f}%", delta=f"{variacion:,.1f}%")
-        k3.metric("Ticket Promedio Pagado", f"${ticket_promedio:,.0f}")
+        k3.metric("Ticket Promedio Pagado", f"${ticket_promedio:,.0f}".replace(",", "."))
         k4.metric("Top Cliente Pagado 2026", top_cliente)    
         st.divider()
           
@@ -531,8 +547,8 @@ if check_password():
                     st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
                     df_churn_display['Variacion_%'] = df_churn_display['Variacion_%'].map(lambda x: f"{x:.1f}%")
-                    df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${x:,.0f}")
-                    df_churn_display['Monto_2026'] = df_churn_display['Monto_2026'].map(lambda x: f"${x:,.0f}")
+                    df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
+                    df_churn_display['Monto_2026'] = df_churn_display['Monto_2026'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
                     df_churn_display.columns = ['Empresa', 'Mes', 'Pagado 2025', 'Pagado 2026', 'Variación (%)']
                     st.dataframe(df_churn_display, hide_index=True, use_container_width=True)
                 else:
@@ -695,7 +711,9 @@ if check_password():
                         return 'Clase C (Bajo Impacto)'
                         
                 df_abc['Categoria'] = df_abc['Porcentaje_Acumulado'].apply(asignar_abc)
-                st.dataframe(df_abc[['Empresa', 'Monto', 'Categoria']], use_container_width=True, hide_index=True)
+                df_abc_disp = df_abc[['Empresa', 'Monto', 'Categoria']].copy()
+                df_abc_disp['Monto'] = df_abc_disp['Monto'].apply(lambda x: f"${int(x):,.0f}".replace(",", "."))
+                st.dataframe(df_abc_disp, use_container_width=True, hide_index=True)
                 st.info("💡 **Estrategia ABC:** Cuida y mantén la relación cercana con tus clientes **Clase A** basándote en su aporte real de caja.")
 
         st.divider()
@@ -756,7 +774,7 @@ if check_password():
                     n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
                     
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
-                    n_monto = st.number_input("Monto ($)", min_value=0.0, step=1000.0)
+                    n_monto = st.number_input("Monto ($)", min_value=0, step=1000, value=0)
                     
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
                     n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
@@ -791,7 +809,7 @@ if check_password():
                             "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
                             "Grupo_Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
-                            "Monto": float(n_monto),
+                            "Monto": int(n_monto),
                             "dias_programados": float(n_dias_prog),
                             "dias_reales": float(n_dias_real),
                             "Fecha_Cotizacion": str(n_f_cot) if n_f_cot else None,
@@ -849,8 +867,8 @@ if check_password():
                             
                             e_servicio_detalle = st.text_input("Servicio (Detalle)", value=str(row_edit.get('Servicio', '')))
                             
-                            monto_val = row_edit.get('Monto', 0.0)
-                            e_monto = st.number_input("Monto ($)", min_value=0.0, value=float(monto_val) if pd.notna(monto_val) else 0.0, step=1000.0)
+                            monto_val = row_edit.get('Monto', 0)
+                            e_monto = st.number_input("Monto ($)", min_value=0, value=int(monto_val) if pd.notna(monto_val) else 0, step=1000)
                             
                             prog_val = row_edit.get('dias_programados', row_edit.get('Dias_Programados', 0.0))
                             e_dias_prog = st.number_input("Días Programados", min_value=0.0, value=float(prog_val) if pd.notna(prog_val) else 0.0, step=1.0)
@@ -887,7 +905,7 @@ if check_password():
                                 "Planta": e_planta.strip().upper() if e_planta else "SIN PLANTA",
                                 "Grupo_Servicio": e_grupo_servicio.upper(),
                                 "Servicio": e_servicio_detalle.strip().upper() if e_servicio_detalle else "SIN DETALLE",
-                                "Monto": float(e_monto),
+                                "Monto": int(e_monto),
                                 "dias_programados": float(e_dias_prog),
                                 "dias_reales": float(e_dias_real),
                                 "Fecha_Cotizacion": str(e_f_cot) if e_f_cot else None,
@@ -953,6 +971,8 @@ if check_password():
                 f_pago_val = row_det.get('Fecha_Pago')
                 dias_cobro = (pd.to_datetime(f_pago_val) - pd.to_datetime(f_emi_val)).days if pd.notna(f_emi_val) and pd.notna(f_pago_val) else "N/A"
                 
+                monto_det_str = f"${int(row_det.get('Monto', 0)):,.0f}".replace(",", ".")
+                
                 # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
@@ -962,7 +982,7 @@ if check_password():
                         st.markdown(f"**Planta:** {row_det.get('Planta', 'N/A')}")
                         st.markdown(f"**Grupo de Servicio:** {row_det.get('Grupo Servicio', 'N/A')}")
                         st.markdown(f"**Servicio Entregado:** {row_det.get('Servicio', 'N/A')}")
-                        st.markdown(f"**Monto:** ${row_det.get('Monto', 0):,.0f}")
+                        st.markdown(f"**Monto:** {monto_det_str}")
                         st.markdown(f"**Días Programados:** {d_prog}")
                         st.markdown(f"**Días Reales:** {d_real}")
                         st.markdown(f"**Desviación de Ejecución:** {desviacion:+g} días")
@@ -990,6 +1010,10 @@ if check_password():
             columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
              
             configuracion_columnas = {
+                "Monto": st.column_config.NumberColumn(
+                    "Monto ($)",
+                    format="$%d"
+                ),
                 "Estado": st.column_config.SelectboxColumn(
                     "Estado del Servicio/Cobro",
                     options=["Esperando OC", "Servicio Ejecutado", "Pagado", "PENDIENTE"],
@@ -1090,7 +1114,7 @@ if check_password():
                 celular = c1.text_input("Celular")
                 estado = c2.selectbox("Estado del Cliente", estados)
                 rol = c1.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"])
-                valor = c2.number_input("Valor", min_value=0.0, step=1000.0)
+                valor = c2.number_input("Valor", min_value=0, step=1000, value=0)
 
                 submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
 
@@ -1110,7 +1134,7 @@ if check_password():
                             "Correo": correo,
                             "Celular": celular,
                             "Estado": estado,
-                            "Valor": valor,
+                            "Valor": int(valor),
                             "Bitacora": "",
                             "Rol_Contacto": rol
                         }])
@@ -1148,10 +1172,11 @@ if check_password():
                 st.subheader(estados[i])
                 contactos_estado = df_contactos[df_contactos["Estado"] == estados[i]]
                 for idx, row in contactos_estado.iterrows():
+                    monto_val_row = f"${int(row['Valor']):,.0f}".replace(",", ".")
                     st.write(f"*{row['Nombre']}*")
                     st.write(f"Empresa: {row['Empresa']}")
                     st.write(f"Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
-                    st.write(f"Valor: ${row['Valor']}")
+                    st.write(f"Valor: {monto_val_row}")
                    
                     correo_contacto = row.get('Correo', '')
                     nombre_contacto = row.get('Nombre', 'Cliente')
@@ -1338,12 +1363,12 @@ if check_password():
         df_contactos['Probabilidad'] = df_contactos['Estado'].map(probabilidades)
         df_contactos['Valor_Ponderado'] = df_contactos['Valor'] * df_contactos['Probabilidad']
 
-        total_pipeline = df_contactos[df_contactos['Estado'] != 'Perdido']['Valor'].sum()
-        forecast_ponderado = df_contactos['Valor_Ponderado'].sum()
+        total_pipeline = int(df_contactos[df_contactos['Estado'] != 'Perdido']['Valor'].sum())
+        forecast_ponderado = int(round(df_contactos['Valor_Ponderado'].sum()))
 
         col_f1, col_f2 = st.columns(2)
-        col_f1.metric("Valor Total en Pipeline Activo", f"${total_pipeline:,.0f}")
-        col_f2.metric("Forecast Ponderado (Proyección Real)", f"${forecast_ponderado:,.0f}")
+        col_f1.metric("Valor Total en Pipeline Activo", f"${total_pipeline:,.0f}".replace(",", "."))
+        col_f2.metric("Forecast Ponderado (Proyección Real)", f"${forecast_ponderado:,.0f}".replace(",", "."))
 
         st.divider()
 
@@ -1395,7 +1420,7 @@ if check_password():
                     n_celular = st.text_input("Celular", row.get('Celular', ''))
                     n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']))
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
-                    n_valor = st.number_input("Valor", value=float(row['Valor']))
+                    n_valor = st.number_input("Valor", value=int(row['Valor']), min_value=0, step=1000)
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
                         df_contactos.loc[idx, 'Nombre'] = n_nombre
@@ -1404,7 +1429,7 @@ if check_password():
                         df_contactos.loc[idx, 'Correo'] = n_correo
                         df_contactos.loc[idx, 'Celular'] = n_celular
                         df_contactos.loc[idx, 'Estado'] = n_estado
-                        df_contactos.loc[idx, 'Valor'] = n_valor
+                        df_contactos.loc[idx, 'Valor'] = int(n_valor)
                         df_contactos.loc[idx, 'Rol_Contacto'] = n_rol
                        
                         df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
