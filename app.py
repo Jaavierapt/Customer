@@ -137,10 +137,10 @@ def calcular_semaforo_avanzado(row):
     else:
         if row.get('Requiere_GES') == 'Sí' and pd.isna(row.get('Fecha_GES')):
             return 'Naranjo (Pendiente emisión GES)'
-         
+          
         if pd.isna(row.get('Fecha_Vencimiento')):
             return 'Sin Fecha Vencimiento'
-         
+          
         dias_vencido = (hoy - row['Fecha_Vencimiento']).days
         if dias_vencido <= 0:
             return 'Azul/Verde (Azul/Verde)'
@@ -693,7 +693,7 @@ if check_password():
                         return 'Clase B (Medio Impacto)'
                     else:
                         return 'Clase C (Bajo Impacto)'
-                       
+                        
                 df_abc['Categoria'] = df_abc['Porcentaje_Acumulado'].apply(asignar_abc)
                 st.dataframe(df_abc[['Empresa', 'Monto', 'Categoria']], use_container_width=True, hide_index=True)
                 st.info("💡 **Estrategia ABC:** Cuida y mantén la relación cercana con tus clientes **Clase A** basándote en su aporte real de caja.")
@@ -816,6 +816,101 @@ if check_password():
                             st.error(f"Error al guardar en Supabase: {e}")
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
+
+        # =====================================================================
+        # APARTADO PARA EDITAR FACTURAS EXISTENTES (TODAS LAS SECCIONES)
+        # =====================================================================
+        with st.expander("✏️ Editar Factura Existente (Todas las Secciones)"):
+            if not df.empty and 'Factura' in df.columns:
+                facturas_list = sorted(df['Factura'].astype(str).unique().tolist())
+                factura_a_editar = st.selectbox("Selecciona la Factura a Modificar:", facturas_list, key="edit_factura_select")
+                
+                if factura_a_editar:
+                    row_edit = df[df['Factura'].astype(str) == str(factura_a_editar)].iloc[0]
+                    
+                    def safe_date_val(val):
+                        if pd.notna(val) and str(val).strip() != "" and str(val) != "None":
+                            try:
+                                return pd.to_datetime(val).date()
+                            except:
+                                return None
+                        return None
+
+                    with st.form("form_editar_factura"):
+                        e_col1, e_col2 = st.columns(2)
+                        with e_col1:
+                            e_empresa = st.text_input("Empresa", value=str(row_edit.get('Empresa', '')))
+                            e_planta = st.text_input("Planta", value=str(row_edit.get('Planta', '')))
+                            
+                            servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                            grp_actual = str(row_edit.get('Grupo Servicio', '')).upper()
+                            idx_grp = servicios_existentes.index(grp_actual) if grp_actual in servicios_existentes else 0
+                            e_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp, key="e_grupo_serv")
+                            
+                            e_servicio_detalle = st.text_input("Servicio (Detalle)", value=str(row_edit.get('Servicio', '')))
+                            
+                            monto_val = row_edit.get('Monto', 0.0)
+                            e_monto = st.number_input("Monto ($)", min_value=0.0, value=float(monto_val) if pd.notna(monto_val) else 0.0, step=1000.0)
+                            
+                            prog_val = row_edit.get('dias_programados', row_edit.get('Dias_Programados', 0.0))
+                            e_dias_prog = st.number_input("Días Programados", min_value=0.0, value=float(prog_val) if pd.notna(prog_val) else 0.0, step=1.0)
+                            
+                            real_val = row_edit.get('dias_reales', row_edit.get('Dias_Reales', 0.0))
+                            e_dias_real = st.number_input("Días Reales", min_value=0.0, value=float(real_val) if pd.notna(real_val) else 0.0, step=1.0)
+
+                        with e_col2:
+                            estado_actual = str(row_edit.get('Estado', 'PENDIENTE'))
+                            opts_estado = ["PENDIENTE", "Pagado", "Esperando OC", "Servicio Ejecutado"]
+                            idx_est = opts_estado.index(estado_actual) if estado_actual in opts_estado else 0
+                            e_estado_pago = st.selectbox("Estado de Pago", opts_estado, index=idx_est, key="e_estado_pago_select")
+                            
+                            e_f_cot = st.date_input("Fecha Cotización", value=safe_date_val(row_edit.get('Fecha_Cotizacion')), key="e_fcot")
+                            e_f_oc = st.date_input("Fecha Orden de Compra", value=safe_date_val(row_edit.get('Fecha_OC')), key="e_foc")
+                            e_f_emi = st.date_input("Fecha Emisión", value=safe_date_val(row_edit.get('Fecha_Emision')), key="e_femi")
+                            e_f_venc = st.date_input("Fecha Vencimiento", value=safe_date_val(row_edit.get('Fecha_Vencimiento')), key="e_fvenc")
+                            
+                            req_ges_act = str(row_edit.get('Requiere_GES', 'No'))
+                            idx_ges = 1 if req_ges_act == "Sí" else 0
+                            e_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], index=idx_ges, key="e_req_ges_select")
+                            e_f_ges = st.date_input("Fecha GES (si aplica)", value=safe_date_val(row_edit.get('Fecha_GES')), key="e_fges")
+                            
+                            e_f_pago = st.date_input("Fecha de Pago", value=safe_date_val(row_edit.get('Fecha_Pago')), key="e_fpago")
+
+                        if st.form_submit_button("💾 Actualizar Factura en Supabase"):
+                            fecha_pago_final = pd.to_datetime(e_f_pago) if e_f_pago else None
+                            fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(e_f_emi) if e_f_emi else None)
+                            anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
+                            mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
+
+                            registro_actualizado = {
+                                "Empresa": e_empresa.strip().upper(),
+                                "Planta": e_planta.strip().upper() if e_planta else "SIN PLANTA",
+                                "Grupo_Servicio": e_grupo_servicio.upper(),
+                                "Servicio": e_servicio_detalle.strip().upper() if e_servicio_detalle else "SIN DETALLE",
+                                "Monto": float(e_monto),
+                                "dias_programados": float(e_dias_prog),
+                                "dias_reales": float(e_dias_real),
+                                "Fecha_Cotizacion": str(e_f_cot) if e_f_cot else None,
+                                "Fecha_OC": str(e_f_oc) if e_f_oc else None,
+                                "Fecha_Emision": str(e_f_emi) if e_f_emi else None,
+                                "Fecha_Vencimiento": str(e_f_venc) if e_f_venc else None,
+                                "Fecha_GES": str(e_f_ges) if e_f_ges else None,
+                                "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
+                                "Estado": e_estado_pago,
+                                "Requiere_GES": e_req_ges,
+                                "Ano": anio_val,
+                                "Mes": mes_val
+                            }
+
+                            try:
+                                supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
+                                st.cache_data.clear()
+                                st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al actualizar la factura en Supabase: {e}")
+            else:
+                st.info("No hay facturas registradas para editar.")
 
         st.divider()
 
