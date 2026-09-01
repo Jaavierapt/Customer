@@ -414,15 +414,39 @@ if check_password():
         st.subheader("🔔 Alertas de Renovación y Vencimientos Anuales")
         if 'Fecha_Vencimiento' in df.columns:
             hoy_alerta = pd.Timestamp(datetime.now().date())
-            df_por_vencer = df[df['Fecha_Pago'].isna() & df['Fecha_Vencimiento'].notna()].copy()
-            if not df_por_vencer.empty:
-                df_por_vencer['Dias_Restantes'] = (df_por_vencer['Fecha_Vencimiento'] - hoy_alerta).dt.days
-                df_proximos = df_por_vencer[(df_por_vencer['Dias_Restantes'] >= 0) & (df_por_vencer['Dias_Restantes'] <= 30)]
+            df_sin_pagar = df[df['Fecha_Pago'].isna() & df['Fecha_Vencimiento'].notna()].copy()
+            if not df_sin_pagar.empty:
+                df_sin_pagar['Dias_Restantes'] = (df_sin_pagar['Fecha_Vencimiento'] - hoy_alerta).dt.days
+                
+                # 1. Facturas ya VENCIDAS (Días restantes menores a 0)
+                df_vencidas = df_sin_pagar[df_sin_pagar['Dias_Restantes'] < 0].copy()
+                if not df_vencidas.empty:
+                    df_vencidas['Dias_Atraso'] = df_vencidas['Dias_Restantes'].abs()
+                    df_vencidas = df_vencidas.sort_values(by='Dias_Atraso', ascending=False)
+                    
+                    st.error(f"🚨 **¡ATENCIÓN URGENTE! HAY {len(df_vencidas)} FACTURAS YA VENCIDAS PENDIENTES DE PAGO**")
+                    st.dataframe(
+                        df_vencidas[['Empresa', 'Planta', 'Factura', 'Monto', 'Fecha_Vencimiento', 'Dias_Atraso']],
+                        column_config={"Dias_Atraso": "Días de Atraso"},
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                
+                # 2. Facturas Próximas a Vencer (Entre 0 y 30 días)
+                df_proximos = df_sin_pagar[(df_sin_pagar['Dias_Restantes'] >= 0) & (df_sin_pagar['Dias_Restantes'] <= 30)].sort_values(by='Dias_Restantes', ascending=True)
                 if not df_proximos.empty:
                     st.warning(f"⚠️ Hay **{len(df_proximos)} contratos/facturas** que vencen en los próximos 30 días. ¡Contacta al cliente para asegurar la renovación!")
-                    st.dataframe(df_proximos[['Empresa', 'Planta', 'Factura', 'Monto', 'Fecha_Vencimiento', 'Dias_Restantes']], hide_index=True)
-                else:
-                    st.info("No hay vencimientos críticos en los próximos 30 días.")
+                    st.dataframe(
+                        df_proximos[['Empresa', 'Planta', 'Factura', 'Monto', 'Fecha_Vencimiento', 'Dias_Restantes']],
+                        column_config={"Dias_Restantes": "Días Restantes"},
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                
+                if df_vencidas.empty and df_proximos.empty:
+                    st.info("No hay vencimientos ni facturas con atraso en este momento.")
+            else:
+                st.info("No hay vencimientos ni facturas con atraso en este momento.")
 
         st.divider()
 
