@@ -836,7 +836,7 @@ if check_password():
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         # =====================================================================
-        # APARTADO PARA EDITAR FACTURAS EXISTENTES (TODAS LAS SECCIONES)
+        # APARTADO PARA EDITAR FACTURAS EXISTENTES (CORREGIDO)
         # =====================================================================
         with st.expander("✏️ Editar Factura Existente (Todas las Secciones)"):
             if not df.empty and 'Factura' in df.columns:
@@ -847,7 +847,7 @@ if check_password():
                     row_edit = df[df['Factura'].astype(str) == str(factura_a_editar)].iloc[0]
                     
                     def safe_date_val(val):
-                        if pd.notna(val) and str(val).strip() != "" and str(val) != "None" and str(val) != "NaT":
+                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan"]:
                             try:
                                 return pd.to_datetime(val).date()
                             except:
@@ -858,16 +858,19 @@ if check_password():
                         d = safe_date_val(val)
                         return str(d) if d else None
 
-                    with st.form("form_editar_factura"):
+                    with st.form(f"form_editar_factura_{factura_a_editar}"):
                         e_col1, e_col2 = st.columns(2)
                         with e_col1:
                             e_empresa = st.text_input("Empresa", value=str(row_edit.get('Empresa', '')))
                             e_planta = st.text_input("Planta", value=str(row_edit.get('Planta', '')))
                             
                             servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
-                            grp_actual = str(row_edit.get('Grupo Servicio', '')).upper()
+                            grp_actual = str(row_edit.get('Grupo Servicio', row_edit.get('Grupo_Servicio', ''))).strip().upper()
+                            if grp_actual and grp_actual not in servicios_existentes:
+                                servicios_existentes.append(grp_actual)
+                                servicios_existentes = sorted(servicios_existentes)
                             idx_grp = servicios_existentes.index(grp_actual) if grp_actual in servicios_existentes else 0
-                            e_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp, key="e_grupo_serv")
+                            e_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp, key=f"e_grupo_serv_{factura_a_editar}")
                             
                             e_servicio_detalle = st.text_input("Servicio (Detalle)", value=str(row_edit.get('Servicio', '')))
                             
@@ -883,23 +886,24 @@ if check_password():
                         with e_col2:
                             estado_actual = str(row_edit.get('Estado', 'PENDIENTE'))
                             opts_estado = ["PENDIENTE", "Pagado", "Esperando OC", "Servicio Ejecutado"]
-                            idx_est = opts_estado.index(estado_actual) if estado_actual in opts_estado else 0
-                            e_estado_pago = st.selectbox("Estado de Pago", opts_estado, index=idx_est, key="e_estado_pago_select")
+                            if estado_actual not in opts_estado:
+                                opts_estado.append(estado_actual)
+                            idx_est = opts_estado.index(estado_actual)
+                            e_estado_pago = st.selectbox("Estado de Pago", opts_estado, index=idx_est, key=f"e_estado_pago_select_{factura_a_editar}")
                             
-                            e_f_cot = st.date_input("Fecha Cotización", value=safe_date_val(row_edit.get('Fecha_Cotizacion')), key="e_fcot")
-                            e_f_oc = st.date_input("Fecha Orden de Compra", value=safe_date_val(row_edit.get('Fecha_OC')), key="e_foc")
-                            e_f_emi = st.date_input("Fecha Emisión", value=safe_date_val(row_edit.get('Fecha_Emision')), key="e_femi")
-                            e_f_venc = st.date_input("Fecha Vencimiento", value=safe_date_val(row_edit.get('Fecha_Vencimiento')), key="e_fvenc")
+                            e_f_cot = st.date_input("Fecha Cotización", value=safe_date_val(row_edit.get('Fecha_Cotizacion')), key=f"e_fcot_{factura_a_editar}")
+                            e_f_oc = st.date_input("Fecha Orden de Compra", value=safe_date_val(row_edit.get('Fecha_OC')), key=f"e_foc_{factura_a_editar}")
+                            e_f_emi = st.date_input("Fecha Emisión", value=safe_date_val(row_edit.get('Fecha_Emision')), key=f"e_femi_{factura_a_editar}")
+                            e_f_venc = st.date_input("Fecha Vencimiento", value=safe_date_val(row_edit.get('Fecha_Vencimiento')), key=f"e_fvenc_{factura_a_editar}")
                             
                             req_ges_act = str(row_edit.get('Requiere_GES', 'No'))
                             idx_ges = 1 if req_ges_act == "Sí" else 0
-                            e_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], index=idx_ges, key="e_req_ges_select")
-                            e_f_ges = st.date_input("Fecha GES (si aplica)", value=safe_date_val(row_edit.get('Fecha_GES')), key="e_fges")
+                            e_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], index=idx_ges, key=f"e_req_ges_select_{factura_a_editar}")
+                            e_f_ges = st.date_input("Fecha GES (si aplica)", value=safe_date_val(row_edit.get('Fecha_GES')), key=f"e_fges_{factura_a_editar}")
                             
-                            e_f_pago = st.date_input("Fecha de Pago", value=safe_date_val(row_edit.get('Fecha_Pago')), key="e_fpago")
+                            e_f_pago = st.date_input("Fecha de Pago", value=safe_date_val(row_edit.get('Fecha_Pago')), key=f"e_fpago_{factura_a_editar}")
 
                         if st.form_submit_button("💾 Actualizar Factura en Supabase"):
-                            # Preservación robusta de datos: si una fecha no cambia o está vacía, se conserva la de la BD
                             f_cot_final = str(e_f_cot) if e_f_cot else safe_date_str(row_edit.get('Fecha_Cotizacion'))
                             f_oc_final = str(e_f_oc) if e_f_oc else safe_date_str(row_edit.get('Fecha_OC'))
                             f_emi_final = str(e_f_emi) if e_f_emi else safe_date_str(row_edit.get('Fecha_Emision'))
@@ -907,7 +911,6 @@ if check_password():
                             f_ges_final = str(e_f_ges) if e_f_ges else safe_date_str(row_edit.get('Fecha_GES'))
                             f_pago_final = str(e_f_pago) if e_f_pago else safe_date_str(row_edit.get('Fecha_Pago'))
 
-                            # Recálculo seguro de Año y Mes sin perder la información existente
                             ref_dt = pd.to_datetime(f_pago_final) if f_pago_final else (pd.to_datetime(f_emi_final) if f_emi_final else None)
                             if pd.notna(ref_dt):
                                 anio_val = int(ref_dt.year)
