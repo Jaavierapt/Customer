@@ -202,13 +202,22 @@ def check_password():
         return False
     return True
 
+# =============================================================================
+# GENERACIÓN DE REPORTE PDF (CORREGIDA PARA EVITAR ERRORES DE UNICODE/ENCODING)
+# =============================================================================
 def generar_pdf(df_original):
+    def safe_txt(txt):
+        """Limpia el texto para evitar errores de codificación Unicode en FPDF (Latin-1)."""
+        if txt is None:
+            return ""
+        return str(txt).encode('latin-1', 'replace').decode('latin-1')
+
     df = df_original.dropna(subset=['Fecha_Pago']).copy()
     pdf = FPDF()
     pdf.add_page()
    
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt="Reporte Ejecutivo CRM Itelcam (Ingresos Reales por Pago)", ln=True, align='C')
+    pdf.cell(200, 10, txt=safe_txt("Reporte Ejecutivo CRM Itelcam (Ingresos Reales por Pago)"), ln=True, align='C')
     pdf.ln(5)
    
     ingresos_totales = int(df['Monto'].sum())
@@ -217,15 +226,15 @@ def generar_pdf(df_original):
     ingresos_2026 = int(df[df['Año'] == 2026]['Monto'].sum()) if 'Año' in df.columns else 0
 
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(200, 6, txt=f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}".replace(",", "."), ln=True)
-    pdf.cell(200, 6, txt=f"Total Clientes: {total_clientes}", ln=True)
+    pdf.cell(200, 6, txt=safe_txt(f"Ingresos Totales (Pagados): ${ingresos_totales:,.0f}".replace(",", ".")), ln=True)
+    pdf.cell(200, 6, txt=safe_txt(f"Total Clientes: {total_clientes}"), ln=True)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(200, 6, txt=f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}".replace(",", "."), ln=True)
+    pdf.cell(200, 6, txt=safe_txt(f"KPIs Anuales (Según Pago) -> 2025: ${ingresos_2025:,.0f} | 2026: ${ingresos_2026:,.0f}".replace(",", ".")), ln=True)
     pdf.ln(5)
 
     if 'Mes' in df.columns and 'Año' in df.columns:
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 8, txt="Comparativa Ingresos Reales 2025 vs 2026", ln=True)
+        pdf.cell(200, 8, txt=safe_txt("Comparativa Ingresos Reales 2025 vs 2026"), ln=True)
        
         plt.figure(figsize=(7, 3.8))
         pivot_df = df.pivot_table(index='Mes', columns='Año', values='Monto', aggfunc='sum').fillna(0)
@@ -265,17 +274,17 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Ingresos Reales por Empresa - Año {anio}", ln=True)
+        pdf.cell(200, 7, txt=safe_txt(f"Ingresos Reales por Empresa - Año {anio}"), ln=True)
         pdf.image(tmp_path, x=25, w=150)
         os.remove(tmp_path)
         pdf.ln(2)
        
         pdf.set_font("Arial", 'B', 9)
-        pdf.cell(200, 5, f"Detalle Empresas ({anio})", ln=True)
+        pdf.cell(200, 5, safe_txt(f"Detalle Empresas ({anio})"), ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in empresa_data.iterrows():
             monto_str = f"${int(row['Monto']):,.0f}".replace(",", ".")
-            pdf.cell(90, 5, f"{row['Empresa']}: {monto_str}", border=1)
+            pdf.cell(90, 5, safe_txt(f"{row['Empresa']}: {monto_str}"), border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -309,17 +318,17 @@ def generar_pdf(df_original):
         plt.close()
        
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(200, 7, txt=f"Mix de Servicios Reales - Año {anio}", ln=True)
+        pdf.cell(200, 7, txt=safe_txt(f"Mix de Servicios Reales - Año {anio}"), ln=True)
         pdf.image(tmp_path, x=20, w=160)
         os.remove(tmp_path)
         pdf.ln(2)
        
         pdf.set_font("Arial", 'B', 9)
-        pdf.cell(200, 5, f"Detalle Mix de Servicios ({anio})", ln=True)
+        pdf.cell(200, 5, safe_txt(f"Detalle Mix de Servicios ({anio})"), ln=True)
         pdf.set_font("Arial", size=8)
         for _, row in servicio_data.iterrows():
             monto_str = f"${int(row['Monto']):,.0f}".replace(",", ".")
-            pdf.cell(90, 5, f"{row['Grupo Servicio']}: {monto_str}", border=1)
+            pdf.cell(90, 5, safe_txt(f"{row['Grupo Servicio']}: {monto_str}"), border=1)
             pdf.ln()
         pdf.ln(4)
 
@@ -836,7 +845,7 @@ if check_password():
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         # =====================================================================
-        # APARTADO PARA EDITAR FACTURAS EXISTENTES (CORREGIDO)
+        # APARTADO PARA EDITAR FACTURAS EXISTENTES
         # =====================================================================
         with st.expander("✏️ Editar Factura Existente (Todas las Secciones)"):
             if not df.empty and 'Factura' in df.columns:
