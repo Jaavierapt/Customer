@@ -85,16 +85,10 @@ def cargar_datos():
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión
-    if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
-        df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
-    else:
-        df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
-
-    if 'Mes' not in df.columns or df['Mes'].isna().all():
-        df['Mes'] = df['Fecha_Pago'].dt.month.fillna(df['Fecha_Emision'].dt.month).fillna(0).astype(int)
-    else:
-        df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
+    # Asignación estricta de Año y Mes basándose EXCLUSIVAMENTE en la Fecha de Pago.
+    # Si la factura no está pagada (Fecha_Pago es NaT/nula), Año y Mes serán 0 para no distorsionar el análisis.
+    df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
+    df['Mes'] = df['Fecha_Pago'].dt.month.fillna(0).astype(int)
 
     df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
     df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
@@ -831,10 +825,9 @@ if check_password():
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
-                        # Cálculo seguro de Año y Mes basados en la fecha de pago o emisión
-                        fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
-                        anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
-                        mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
+                        # Cálculo estricto de Año y Mes basándose ÚNICAMENTE en la Fecha de Pago
+                        anio_val = int(fecha_pago_final.year) if pd.notna(fecha_pago_final) else None
+                        mes_val = int(fecha_pago_final.month) if pd.notna(fecha_pago_final) else None
 
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
@@ -944,13 +937,14 @@ if check_password():
                             f_ges_final = str(e_f_ges) if e_f_ges else safe_date_str(row_edit.get('Fecha_GES'))
                             f_pago_final = str(e_f_pago) if e_f_pago else safe_date_str(row_edit.get('Fecha_Pago'))
 
-                            ref_dt = pd.to_datetime(f_pago_final) if f_pago_final else (pd.to_datetime(f_emi_final) if f_emi_final else None)
+                            # Asignar Año y Mes únicamente si hay Fecha de Pago efectiva
+                            ref_dt = pd.to_datetime(f_pago_final) if f_pago_final else None
                             if pd.notna(ref_dt):
                                 anio_val = int(ref_dt.year)
                                 mes_val = int(ref_dt.month)
                             else:
-                                anio_val = int(row_edit.get('Año', 0)) if pd.notna(row_edit.get('Año')) else None
-                                mes_val = int(row_edit.get('Mes', 0)) if pd.notna(row_edit.get('Mes')) else None
+                                anio_val = None
+                                mes_val = None
 
                             registro_actualizado = {
                                 "Empresa": e_empresa.strip().upper(),
