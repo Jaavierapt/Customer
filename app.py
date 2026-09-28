@@ -1,7 +1,7 @@
 import os
 import io
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import plotly.express as px
 from fpdf import FPDF
@@ -42,7 +42,7 @@ def cargar_datos():
             "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
             "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
             "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
+            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes", "Folio_Cotizacion"
         ])
         
     df = pd.DataFrame(data)
@@ -85,10 +85,16 @@ def cargar_datos():
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación estricta de Año y Mes basándose EXCLUSIVAMENTE en la Fecha de Pago.
-    # Si la factura no está pagada (Fecha_Pago es NaT/nula), Año y Mes serán 0 para no distorsionar el análisis.
-    df['Año'] = df['Fecha_Pago'].dt.year.fillna(0).astype(int)
-    df['Mes'] = df['Fecha_Pago'].dt.month.fillna(0).astype(int)
+    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión
+    if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
+        df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
+    else:
+        df['Año'] = pd.to_numeric(df['Año'], errors='coerce').fillna(0).astype(int)
+
+    if 'Mes' not in df.columns or df['Mes'].isna().all():
+        df['Mes'] = df['Fecha_Pago'].dt.month.fillna(df['Fecha_Emision'].dt.month).fillna(0).astype(int)
+    else:
+        df['Mes'] = pd.to_numeric(df['Mes'], errors='coerce').fillna(0).astype(int)
 
     df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
     df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
@@ -125,6 +131,42 @@ def guardar_contacto(nombre, email, estado, telefono=""):
     }
     response = supabase.table("Contactos").insert(nuevo_registro).execute()
     return response
+
+# --- GESTIÓN DE COTIZACIONES ---
+ARCHIVO_COTIZACIONES = "cotizaciones.csv"
+
+def cargar_cotizaciones():
+    """Carga cotizaciones desde Supabase o fallback a CSV local."""
+    try:
+        res = supabase.table("cotizaciones").select("*").execute()
+        if res.data:
+            return pd.DataFrame(res.data)
+    except Exception:
+        pass
+    
+    if os.path.exists(ARCHIVO_COTIZACIONES):
+        return pd.read_csv(ARCHIVO_COTIZACIONES)
+    else:
+        cols = [
+            "Folio", "Empresa", "RUT_Empresa", "Planta", "Contacto", "Email_Contacto", 
+            "Fono_Contacto", "Ejecutivo", "Email_Ejecutivo", "Fono_Ejecutivo", 
+            "Condicion_Pago", "Fecha_Emision", "Fecha_Validez", "Glosa", 
+            "Grupo_Servicio", "Detalle_Servicio", "Cantidad", "Unidad", 
+            "Monto_Neto", "Monto_IVA", "Monto_Total", "Estado"
+        ]
+        return pd.DataFrame(columns=cols)
+
+def guardar_cotizacion(dict_cot):
+    """Guarda o actualiza cotización en Supabase y archivo local."""
+    df_cot = cargar_cotizaciones()
+    nueva_cot = pd.DataFrame([dict_cot])
+    df_cot = pd.concat([df_cot[df_cot['Folio'] != dict_cot['Folio']], nueva_cot], ignore_index=True)
+    df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
+    
+    try:
+        supabase.table("cotizaciones").upsert(dict_cot).execute()
+    except Exception:
+        pass
 
 def obtener_consejo_ia(notas_bitacora):
     return (
@@ -197,7 +239,7 @@ def check_password():
     return True
 
 # =============================================================================
-# GENERACIÓN DE REPORTE PDF (CORREGIDA PARA EVITAR ERRORES DE UNICODE/ENCODING)
+# GENERACIÓN DE REPORTE PDF
 # =============================================================================
 def generar_pdf(df_original):
     def safe_txt(txt):
@@ -399,8 +441,16 @@ if check_password():
         df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
 
     df = cargar_datos()
+    df_cotizaciones = cargar_cotizaciones()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🏢 Gestión por Planta", "📈 Análisis Estratégico", "➕ Gestión de Facturas y Ciclo de Pago", "🔥 Embudo Ventas"])
+    tab1, tab2, tab3, tab_cot, tab4, tab5 = st.tabs([
+        "📊 Dashboard", 
+        "🏢 Gestión por Planta", 
+        "📈 Análisis Estratégico", 
+        "📑 Cotizaciones",
+        "➕ Gestión de Facturas y Ciclo de Pago", 
+        "🔥 Embudo Ventas"
+    ])
    
     with tab1:
         st.info("💡 **Nota Financiera:** Todos los ingresos, gráficos y métricas mostrados a continuación reflejan exclusivamente los montos correspondientes a su **fecha de pago efectiva**.")
@@ -702,7 +752,7 @@ if check_password():
             df_2026['Grupo Servicio'] = df_2026[col_serv_2026]
 
         st.write("### Identificación de Venta Cruzada")
-        servicios_disponibles = df_2026['Grupo Servicio'].unique() if not df_2026.empty else ["SIN SERVICIO"]
+        servicios_disponibles = df_2026['Grupo Servicio'].unique() if not df_2026.empty else ["SERVICIO GENERAL"]
         servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles, key="select_servicio_target_cruzada")
              
         clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique() if not df_2026.empty else []
@@ -786,22 +836,163 @@ if check_password():
         else:
             st.warning("No hay datos suficientes de pagos del año 2026 para ejecutar el Gap Analysis.")
 
+    # =========================================================================
+    # NUEVA SECCIÓN: MÓDULO DE COTIZACIONES
+    # =========================================================================
+    with tab_cot:
+        st.header("📑 Gestión de Cotizaciones")
+
+        with st.expander("➕ Generar Nueva Cotización (Estructura Documento)", expanded=False):
+            with st.form("form_nueva_cotizacion", clear_on_submit=True):
+                st.subheader("1. Identificación y Encabezado del Documento")
+                c_head1, c_head2, c_head3 = st.columns(3)
+                
+                with c_head1:
+                    cot_folio = st.text_input("Folio N° *", value=f"137{len(df_cotizaciones)+7}")
+                    cot_empresa = st.text_input("Empresa (Cliente) *", value="EDUCACION Y CAPACITACION VICTOR EDGARDO MORALES CIFRAS E.I.R.L")
+                    cot_rut = st.text_input("RUT Cliente *", value="76608422-2")
+                    cot_planta = st.text_input("Planta / Sucursal", value="RANCAGUA")
+                
+                with c_head2:
+                    cot_contacto = st.text_input("Nombre Contacto Cliente", value="VICTOR EDGARDO MORALES CIFRAS")
+                    cot_email_cont = st.text_input("Email Contacto", value="")
+                    cot_fono_cont = st.text_input("Fono Contacto", value="982065425")
+                    cot_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"])
+
+                with c_head3:
+                    cot_ejecutivo = st.text_input("Ejecutivo Comercial", value="Edgar Jesús Cabrera")
+                    cot_email_ejec = st.text_input("Email Ejecutivo", value="edgar.cabrera@itelcam.cl")
+                    cot_fono_ejec = st.text_input("Fono Ejecutivo", value="982065425")
+                    
+                    c_f1, c_f2 = st.columns(2)
+                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=datetime.now())
+                    cot_f_val = c_f2.date_input("Válido Hasta", value=datetime.now() + timedelta(days=15))
+
+                st.divider()
+                st.subheader("2. Glosa Descriptiva del Servicio")
+                cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", 
+                                         value="Se ejecuta atención de llamado por falla en la visualización de las cámaras de seguridad. Se restaura la visualización y se valida solución.")
+
+                st.divider()
+                st.subheader("3. Detalle por Sección / Items Cotizados")
+                
+                servicios_exist = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                cot_grupo_serv = st.selectbox("Grupo de Servicio", options=servicios_exist, key="cot_grupo_serv_sel")
+                
+                det_col1, det_col2, det_col3, det_col4 = st.columns([1, 1, 4, 2])
+                cot_cant = det_col1.number_input("Cant.", min_value=1, value=1)
+                cot_uni = det_col2.text_input("Unid.", value="SC")
+                cot_detalle = det_col3.text_input("Detalle del Servicio", value="Servicio de restauración y configuración de IVMS4200 en el Computador de Secretaria y restauración en móviles")
+                cot_neto = det_col4.number_input("Valor Neto ($)", min_value=0, step=1000, value=32765)
+
+                # Totales
+                calc_iva = int(round(cot_neto * 0.19))
+                calc_total = cot_neto + calc_iva
+                
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Subtotal Neto", f"${cot_neto:,.0f}".replace(",", "."))
+                m2.metric("IVA (19%)", f"${calc_iva:,.0f}".replace(",", "."))
+                m3.metric("Total Cotización", f"${calc_total:,.0f}".replace(",", "."))
+
+                if st.form_submit_button("💾 Guardar y Registrar Cotización"):
+                    if cot_folio and cot_empresa:
+                        dict_guardar = {
+                            "Folio": str(cot_folio).strip(),
+                            "Empresa": cot_empresa.strip().upper(),
+                            "RUT_Empresa": cot_rut.strip(),
+                            "Planta": cot_planta.strip().upper(),
+                            "Contacto": cot_contacto.strip(),
+                            "Email_Contacto": cot_email_cont.strip(),
+                            "Fono_Contacto": cot_fono_cont.strip(),
+                            "Ejecutivo": cot_ejecutivo.strip(),
+                            "Email_Ejecutivo": cot_email_ejec.strip(),
+                            "Fono_Ejecutivo": cot_fono_ejec.strip(),
+                            "Condicion_Pago": cot_condicion,
+                            "Fecha_Emision": str(cot_f_emi),
+                            "Fecha_Validez": str(cot_f_val),
+                            "Glosa": cot_glosa.strip(),
+                            "Grupo_Servicio": cot_grupo_serv.upper(),
+                            "Detalle_Servicio": cot_detalle.strip().upper(),
+                            "Cantidad": int(cot_cant),
+                            "Unidad": cot_uni.strip().upper(),
+                            "Monto_Neto": int(cot_neto),
+                            "Monto_IVA": calc_iva,
+                            "Monto_Total": calc_total,
+                            "Estado": "APROBADA"
+                        }
+                        guardar_cotizacion(dict_guardar)
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente!")
+                        st.rerun()
+                    else:
+                        st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
+
+        st.divider()
+
+        st.subheader("📋 Historial de Cotizaciones Emitidas")
+        if not df_cotizaciones.empty:
+            st.dataframe(
+                df_cotizaciones[["Folio", "Empresa", "Planta", "Fecha_Emision", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
+                column_config={
+                    "Monto_Neto": st.column_config.NumberColumn("Monto Neto", format="$%d"),
+                    "Monto_Total": st.column_config.NumberColumn("Total CLP", format="$%d")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No hay cotizaciones registradas aún.")
+
     with tab4:
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
+        # =====================================================================
+        # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES)
+        # =====================================================================
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
+            
+            # Sub-sección para importar desde cotización
+            st.markdown("### 🔗 Enlazar desde Cotización Existente (Opcional)")
+            cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
+            cot_sel = st.selectbox("Seleccionar Cotización para importar datos:", ["--- Sin Enlace ---"] + cotizaciones_list, key="select_cot_to_fact")
+            
+            # Precarga de variables
+            p_empresa = ""
+            p_planta = ""
+            p_grupo_serv = "SERVICIO GENERAL"
+            p_detalle = ""
+            p_monto = 0
+            p_fecha_cot = None
+            
+            if cot_sel != "--- Sin Enlace ---":
+                row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
+                p_empresa = str(row_c.get("Empresa", ""))
+                p_planta = str(row_c.get("Planta", ""))
+                p_grupo_serv = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL"))
+                p_detalle = str(row_c.get("Detalle_Servicio", ""))
+                p_monto = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
+                try:
+                    p_fecha_cot = pd.to_datetime(row_c.get("Fecha_Emision")).date()
+                except:
+                    p_fecha_cot = None
+                st.info(f"💡 Datos cargados automáticamente desde Cotización Folio **#{cot_sel}**")
+
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
                 with fc1:
                     n_factura = st.text_input("Número de Factura / Documento")
-                    n_empresa_ins = st.text_input("Empresa")
-                    n_planta_ins = st.text_input("Planta")
+                    n_empresa_ins = st.text_input("Empresa", value=p_empresa)
+                    n_planta_ins = st.text_input("Planta", value=p_planta)
                     
                     servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
-                    n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, key="n_grupo_serv_input")
+                    if p_grupo_serv and p_grupo_serv not in servicios_existentes:
+                        servicios_existentes.append(p_grupo_serv)
+                        servicios_existentes = sorted(servicios_existentes)
                     
-                    n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", key="n_serv_det_input")
-                    n_monto = st.number_input("Monto ($)", min_value=0, step=1000, value=0)
+                    idx_grp_p = servicios_existentes.index(p_grupo_serv) if p_grupo_serv in servicios_existentes else 0
+                    n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp_p, key="n_grupo_serv_input")
+                    
+                    n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", value=p_detalle, key="n_serv_det_input")
+                    n_monto = st.number_input("Monto ($)", min_value=0, step=1000, value=p_monto)
                     
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
                     n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
@@ -813,7 +1004,7 @@ if check_password():
                     else:
                         n_f_pago = st.date_input("Fecha de Pago", value=None)
                         
-                    n_f_cot = st.date_input("Fecha Cotización", value=None)
+                    n_f_cot = st.date_input("Fecha Cotización", value=p_fecha_cot)
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
                     n_f_emi = st.date_input("Fecha Emisión", value=None)
                     n_f_venc = st.date_input("Fecha Vencimiento", value=None)
@@ -825,9 +1016,10 @@ if check_password():
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
-                        # Cálculo estricto de Año y Mes basándose ÚNICAMENTE en la Fecha de Pago
-                        anio_val = int(fecha_pago_final.year) if pd.notna(fecha_pago_final) else None
-                        mes_val = int(fecha_pago_final.month) if pd.notna(fecha_pago_final) else None
+                        # Cálculo seguro de Año y Mes basados en la fecha de pago o emisión
+                        fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
+                        anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
+                        mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
 
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
@@ -848,7 +1040,8 @@ if check_password():
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
                             "Ano": anio_val,
-                            "Mes": mes_val
+                            "Mes": mes_val,
+                            "Folio_Cotizacion": str(cot_sel) if cot_sel != "--- Sin Enlace ---" else None
                         }
                         
                         try:
@@ -937,14 +1130,13 @@ if check_password():
                             f_ges_final = str(e_f_ges) if e_f_ges else safe_date_str(row_edit.get('Fecha_GES'))
                             f_pago_final = str(e_f_pago) if e_f_pago else safe_date_str(row_edit.get('Fecha_Pago'))
 
-                            # Asignar Año y Mes únicamente si hay Fecha de Pago efectiva
-                            ref_dt = pd.to_datetime(f_pago_final) if f_pago_final else None
+                            ref_dt = pd.to_datetime(f_pago_final) if f_pago_final else (pd.to_datetime(f_emi_final) if f_emi_final else None)
                             if pd.notna(ref_dt):
                                 anio_val = int(ref_dt.year)
                                 mes_val = int(ref_dt.month)
                             else:
-                                anio_val = None
-                                mes_val = None
+                                anio_val = int(row_edit.get('Año', 0)) if pd.notna(row_edit.get('Año')) else None
+                                mes_val = int(row_edit.get('Mes', 0)) if pd.notna(row_edit.get('Mes')) else None
 
                             registro_actualizado = {
                                 "Empresa": e_empresa.strip().upper(),
@@ -1084,7 +1276,7 @@ if check_password():
                         st.error(f"Error al actualizar factura {fac_num}: {e}")
                 st.cache_data.clear()
                 st.success("¡Estados actualizados exitosamente en Supabase!")
-                st.session_state["active_tab"] = 3
+                st.session_state["active_tab"] = 4
                 st.rerun()
 
         st.divider()
@@ -1124,8 +1316,7 @@ if check_password():
             pct_clientes_rec = 0.0
             pct_servicios_rec = 0.0
 
-        # 3. Tiempo de Conversión (Días promedio desde que se crea/contacta hasta pasar a Ganado, estimado con interacción o fecha de pago)
-        # 4. Tiempo de Respuesta (Promedio de días entre interacciones en el historial)
+        # 3. Tiempo de Respuesta
         promedio_dias_respuesta = 0.0
         if not df_interacciones.empty:
             try:
@@ -1191,7 +1382,7 @@ if check_password():
                         else:
                             st.warning(f"¡Cliente {nombre} guardado en tu sistema local, pero hubo un error de conexión con Supabase!")
                              
-                        st.session_state["active_tab"] = 4
+                        st.session_state["active_tab"] = 5
                         st.rerun()
                     else:
                         st.warning("Por favor completa los campos obligatorios (*).")
@@ -1322,7 +1513,7 @@ if check_password():
 
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
                         df_contactos.drop(idx).to_csv(ARCHIVO_CONTACTOS, index=False)
-                        st.session_state["active_tab"] = 4
+                        st.session_state["active_tab"] = 5
                         st.rerun()
 
         st.divider()
@@ -1480,5 +1671,5 @@ if check_password():
                        
                         df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
                         st.success("¡Contacto actualizado con éxito!")
-                        st.session_state["active_tab"] = 4
+                        st.session_state["active_tab"] = 5
                         st.rerun()
