@@ -140,12 +140,18 @@ def cargar_cotizaciones():
     try:
         res = supabase.table("cotizaciones").select("*").execute()
         if res.data:
-            return pd.DataFrame(res.data)
+            df_c = pd.DataFrame(res.data)
+            if 'Fecha_Emision' in df_c.columns:
+                df_c['Fecha_Emision'] = pd.to_datetime(df_c['Fecha_Emision'], errors='coerce').dt.strftime('%Y-%m-%d')
+            return df_c
     except Exception:
         pass
     
     if os.path.exists(ARCHIVO_COTIZACIONES):
-        return pd.read_csv(ARCHIVO_COTIZACIONES)
+        df_c = pd.read_csv(ARCHIVO_COTIZACIONES)
+        if 'Fecha_Emision' in df_c.columns:
+            df_c['Fecha_Emision'] = pd.to_datetime(df_c['Fecha_Emision'], errors='coerce').dt.strftime('%Y-%m-%d')
+        return df_c
     else:
         cols = [
             "Folio", "Empresa", "RUT_Empresa", "Planta", "Contacto", "Email_Contacto", 
@@ -876,7 +882,7 @@ if check_password():
                     cot_fono_ejec = st.text_input("Fono Ejecutivo", value="982065425")
                     
                     c_f1, c_f2 = st.columns(2)
-                    # FECHAS EXTRAÍDAS FIJAS DE LA COTIZACIÓN ADJUNTA
+                    # FECHAS COINCIDENTES CON EL DOCUMENTO (28-08-2026 y 12-09-2026)
                     cot_f_emi = c_f1.date_input("Fecha Emisión", value=date(2026, 8, 28))
                     cot_f_val = c_f2.date_input("Válido Hasta", value=date(2026, 9, 12))
 
@@ -933,7 +939,8 @@ if check_password():
                             "Estado": "APROBADA"
                         }
                         guardar_cotizacion(dict_guardar)
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente!")
+                        st.cache_data.clear()
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente con fecha {cot_f_emi}!")
                         st.rerun()
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
@@ -949,13 +956,13 @@ if check_password():
                 if folio_cot_editar:
                     row_c_edit = df_cotizaciones[df_cotizaciones['Folio'].astype(str) == str(folio_cot_editar)].iloc[0]
                     
-                    def safe_date_cot(val):
+                    def safe_date_cot(val, default_val=None):
                         if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan"]:
                             try:
                                 return pd.to_datetime(val).date()
                             except:
-                                return None
-                        return None
+                                return default_val
+                        return default_val
 
                     with st.form(f"form_edit_cot_{folio_cot_editar}"):
                         st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
@@ -979,8 +986,8 @@ if check_password():
                             ec_ejecutivo = st.text_input("Ejecutivo", value=str(row_c_edit.get('Ejecutivo', '')))
                             ec_email_ejec = st.text_input("Email Ejecutivo", value=str(row_c_edit.get('Email_Ejecutivo', '')))
                             ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
-                            ec_f_emi = st.date_input("Fecha Emisión", value=safe_date_cot(row_c_edit.get('Fecha_Emision')))
-                            ec_f_val = st.date_input("Válido Hasta", value=safe_date_cot(row_c_edit.get('Fecha_Validez')))
+                            ec_f_emi = st.date_input("Fecha Emisión", value=safe_date_cot(row_c_edit.get('Fecha_Emision'), date(2026, 8, 28)))
+                            ec_f_val = st.date_input("Válido Hasta", value=safe_date_cot(row_c_edit.get('Fecha_Validez'), date(2026, 9, 12)))
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
                         
@@ -1028,6 +1035,7 @@ if check_password():
                                 "Estado": ec_estado
                             }
                             guardar_cotizacion(dict_editado)
+                            st.cache_data.clear()
                             st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente!")
                             st.rerun()
             else:
@@ -1047,6 +1055,7 @@ if check_password():
                     
                     if st.button(f"🔥 Confirmar y Eliminar Cotización #{folio_cot_del}", key="btn_confirm_del_cot"):
                         eliminar_cotizacion(folio_cot_del)
+                        st.cache_data.clear()
                         st.success(f"Cotización Folio #{folio_cot_del} eliminada con éxito de Supabase y el sistema local.")
                         st.rerun()
             else:
@@ -1056,11 +1065,16 @@ if check_password():
 
         st.subheader("📋 Historial de Cotizaciones Emitidas")
         if not df_cotizaciones.empty:
+            df_cot_disp = df_cotizaciones.copy()
+            if 'Fecha_Emision' in df_cot_disp.columns:
+                df_cot_disp['Fecha_Emision'] = pd.to_datetime(df_cot_disp['Fecha_Emision'], errors='coerce').dt.strftime('%Y-%m-%d')
+                
             st.dataframe(
-                df_cotizaciones[["Folio", "Empresa", "Planta", "Fecha_Emision", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
+                df_cot_disp[["Folio", "Empresa", "Planta", "Fecha_Emision", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
                 column_config={
                     "Monto_Neto": st.column_config.NumberColumn("Monto Neto", format="$%d"),
-                    "Monto_Total": st.column_config.NumberColumn("Total CLP", format="$%d")
+                    "Monto_Total": st.column_config.NumberColumn("Total CLP", format="$%d"),
+                    "Fecha_Emision": "Fecha Emisión"
                 },
                 use_container_width=True,
                 hide_index=True
@@ -1087,7 +1101,7 @@ if check_password():
             p_grupo_serv = "SERVICIO GENERAL"
             p_detalle = ""
             p_monto = 0
-            p_fecha_cot = None
+            p_fecha_cot = date(2026, 8, 28)
             
             if cot_sel != "--- Sin Enlace ---":
                 row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
@@ -1099,8 +1113,8 @@ if check_password():
                 try:
                     p_fecha_cot = pd.to_datetime(row_c.get("Fecha_Emision")).date()
                 except:
-                    p_fecha_cot = None
-                st.info(f"💡 Datos cargados automáticamente desde Cotización Folio **#{cot_sel}**")
+                    p_fecha_cot = date(2026, 8, 28)
+                st.info(f"💡 Datos cargados automáticamente desde Cotización Folio **#{cot_sel}** (Fecha de Emisión: {p_fecha_cot})")
 
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
