@@ -12,14 +12,24 @@ import matplotlib.pyplot as plt
 from supabase import create_client, Client
 import streamlit as st
 
-# Importación segura para lectura de PDF de cotizaciones
+# Importación ultra-robusta de librerías para lectura de PDF
+PDF_READER_AVAILABLE = False
 try:
     import pypdf
+    PDF_READER_TYPE = "pypdf"
+    PDF_READER_AVAILABLE = True
 except ImportError:
     try:
         import PyPDF2 as pypdf
+        PDF_READER_TYPE = "pypdf2"
+        PDF_READER_AVAILABLE = True
     except ImportError:
-        pypdf = None
+        try:
+            import pdfplumber
+            PDF_READER_TYPE = "pdfplumber"
+            PDF_READER_AVAILABLE = True
+        except ImportError:
+            PDF_READER_AVAILABLE = False
 
 # --- CONFIGURACIÓN ÚNICA AL INICIO ---
 st.set_page_config(page_title="Itelcam CRM", layout="wide")
@@ -58,7 +68,6 @@ def cargar_datos():
     df = pd.DataFrame(data)
     df.columns = df.columns.str.strip()
     
-    # Mapeo flexible para reconocer cualquier variante incluyendo tildes, eñes y minúsculas
     for col_posible in ['AÑO', 'Año', 'ano', 'anio', 'ANO']:
         if col_posible in df.columns and 'Año' not in df.columns:
             df = df.rename(columns={col_posible: 'Año'})
@@ -69,7 +78,6 @@ def cargar_datos():
             df = df.rename(columns={col_mes: 'Mes'})
             break
     
-    # Limpieza robusta de montos
     if 'Monto' in df.columns:
         def limpiar_monto_entero(val):
             if pd.isna(val) or val is None:
@@ -90,12 +98,10 @@ def cargar_datos():
     else:
         df['Monto'] = 0
         
-    # Conversión segura de fechas
     for col in ['Fecha_Cotizacion', 'Fecha_OC', 'Fecha_Emision', 'Fecha_GES', 'Fecha_Pago', 'Fecha_Vencimiento']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación de Año y Mes
     if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
     else:
@@ -109,7 +115,6 @@ def cargar_datos():
     df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
     df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
     
-    # Sincronizar nombres de columnas de servicio
     if 'Grupo_Servicio' in df.columns:
         df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
     elif 'Grupo Servicio' in df.columns:
@@ -849,16 +854,24 @@ if check_password():
             archivo_pdf_cot = st.file_uploader("Seleccionar archivo PDF Cotización", type=["pdf"], key="uploader_pdf_cotizacion")
             
             if archivo_pdf_cot is not None:
-                if pypdf is None:
-                    st.error("Error: La librería 'pypdf' o 'PyPDF2' no está disponible para procesar archivos PDF.")
+                if not PDF_READER_AVAILABLE:
+                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pypdf` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
-                        reader = pypdf.PdfReader(archivo_pdf_cot)
                         texto_extraido = ""
-                        for page in reader.pages:
-                            txt_p = page.extract_text()
-                            if txt_p:
-                                texto_extraido += txt_p + "\n"
+                        
+                        if PDF_READER_TYPE in ["pypdf", "pypdf2"]:
+                            reader = pypdf.PdfReader(archivo_pdf_cot)
+                            for page in reader.pages:
+                                txt_p = page.extract_text()
+                                if txt_p:
+                                    texto_extraido += txt_p + "\n"
+                        elif PDF_READER_TYPE == "pdfplumber":
+                            with pdfplumber.open(archivo_pdf_cot) as pdf_doc:
+                                for page in pdf_doc.pages:
+                                    txt_p = page.extract_text()
+                                    if txt_p:
+                                        texto_extraido += txt_p + "\n"
 
                         if texto_extraido:
                             import re
