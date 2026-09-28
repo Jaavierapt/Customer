@@ -43,7 +43,7 @@ def cargar_datos():
             "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
             "Monto", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
             "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes", "Folio_Cotizacion"
+            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
         ])
         
     df = pd.DataFrame(data)
@@ -1091,7 +1091,7 @@ if check_password():
                     elif emisor_elem is not None and emisor_elem.text:
                         xml_empresa = emisor_elem.text.strip().upper()
                         
-                    # 3. Monto Neto (Se cambia MntTotal por MntNeto)
+                    # 3. Monto Neto
                     neto_elem = root.find(".//MntNeto")
                     if neto_elem is not None and neto_elem.text:
                         try:
@@ -1114,10 +1114,9 @@ if check_password():
                         except:
                             xml_fecha_venc = None
                     elif xml_fecha_emi:
-                        # Si el XML no trae vencimiento explícito, se proyecta a 30 días
                         xml_fecha_venc = xml_fecha_emi + timedelta(days=30)
 
-                    # 5. Detalle del Servicio (Extrae todos los nombres y descripciones de ítems)
+                    # 5. Detalle del Servicio
                     detalles_items = []
                     for item in root.findall(".//DchItem"):
                         nmb = item.find("NmbItem")
@@ -1242,8 +1241,7 @@ if check_password():
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
                             "Ano": anio_val,
-                            "Mes": mes_val,
-                            "Folio_Cotizacion": str(cot_sel) if cot_sel != "--- Sin Enlace ---" else None
+                            "Mes": mes_val
                         }
                         
                         try:
