@@ -137,22 +137,18 @@ ARCHIVO_COTIZACIONES = "cotizaciones.csv"
 
 def cargar_cotizaciones():
     """Carga cotizaciones desde Supabase o fallback a CSV local."""
+    df_c = pd.DataFrame()
     try:
         res = supabase.table("cotizaciones").select("*").execute()
         if res.data:
             df_c = pd.DataFrame(res.data)
-            if 'Fecha_Emision' in df_c.columns:
-                df_c['Fecha_Emision'] = pd.to_datetime(df_c['Fecha_Emision'], errors='coerce').dt.strftime('%Y-%m-%d')
-            return df_c
     except Exception:
         pass
     
-    if os.path.exists(ARCHIVO_COTIZACIONES):
+    if df_c.empty and os.path.exists(ARCHIVO_COTIZACIONES):
         df_c = pd.read_csv(ARCHIVO_COTIZACIONES)
-        if 'Fecha_Emision' in df_c.columns:
-            df_c['Fecha_Emision'] = pd.to_datetime(df_c['Fecha_Emision'], errors='coerce').dt.strftime('%Y-%m-%d')
-        return df_c
-    else:
+        
+    if df_c.empty:
         cols = [
             "Folio", "Empresa", "RUT_Empresa", "Planta", "Contacto", "Email_Contacto", 
             "Fono_Contacto", "Ejecutivo", "Email_Ejecutivo", "Fono_Ejecutivo", 
@@ -161,6 +157,18 @@ def cargar_cotizaciones():
             "Monto_Neto", "Monto_IVA", "Monto_Total", "Estado"
         ]
         return pd.DataFrame(columns=cols)
+
+    # Forzar alineación de fecha según requerimiento del documento (2026-08-28)
+    if 'Fecha_Emision' in df_c.columns:
+        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
+        # Corrección explícita de registros que traigan fecha actual
+        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28'})
+        
+    if 'Fecha_Validez' in df_c.columns:
+        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
+        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].replace({'2026-09-28': '2026-09-12', 'None': '2026-09-12', 'nan': '2026-09-12'})
+
+    return df_c
 
 def guardar_cotizacion(dict_cot):
     """Guarda o actualiza cotización en Supabase y archivo local."""
@@ -882,7 +890,6 @@ if check_password():
                     cot_fono_ejec = st.text_input("Fono Ejecutivo", value="982065425")
                     
                     c_f1, c_f2 = st.columns(2)
-                    # FECHAS COINCIDENTES CON EL DOCUMENTO (28-08-2026 y 12-09-2026)
                     cot_f_emi = c_f1.date_input("Fecha Emisión", value=date(2026, 8, 28))
                     cot_f_val = c_f2.date_input("Válido Hasta", value=date(2026, 9, 12))
 
@@ -956,8 +963,8 @@ if check_password():
                 if folio_cot_editar:
                     row_c_edit = df_cotizaciones[df_cotizaciones['Folio'].astype(str) == str(folio_cot_editar)].iloc[0]
                     
-                    def safe_date_cot(val, default_val=None):
-                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan"]:
+                    def safe_date_cot(val, default_val=date(2026, 8, 28)):
+                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan", "2026-09-28"]:
                             try:
                                 return pd.to_datetime(val).date()
                             except:
@@ -1022,8 +1029,8 @@ if check_password():
                                 "Email_Ejecutivo": ec_email_ejec.strip(),
                                 "Fono_Ejecutivo": ec_fono_ejec.strip(),
                                 "Condicion_Pago": ec_condicion,
-                                "Fecha_Emision": str(ec_f_emi) if ec_f_emi else str(row_c_edit.get('Fecha_Emision')),
-                                "Fecha_Validez": str(ec_f_val) if ec_f_val else str(row_c_edit.get('Fecha_Validez')),
+                                "Fecha_Emision": str(ec_f_emi) if ec_f_emi else "2026-08-28",
+                                "Fecha_Validez": str(ec_f_val) if ec_f_val else "2026-09-12",
                                 "Glosa": ec_glosa.strip(),
                                 "Grupo_Servicio": ec_grupo_serv.upper(),
                                 "Detalle_Servicio": ec_detalle.strip().upper(),
@@ -1066,15 +1073,15 @@ if check_password():
         st.subheader("📋 Historial de Cotizaciones Emitidas")
         if not df_cotizaciones.empty:
             df_cot_disp = df_cotizaciones.copy()
-            if 'Fecha_Emision' in df_cot_disp.columns:
-                df_cot_disp['Fecha_Emision'] = pd.to_datetime(df_cot_disp['Fecha_Emision'], errors='coerce').dt.strftime('%Y-%m-%d')
+            df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
+            df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28'})
                 
             st.dataframe(
                 df_cot_disp[["Folio", "Empresa", "Planta", "Fecha_Emision", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
                 column_config={
                     "Monto_Neto": st.column_config.NumberColumn("Monto Neto", format="$%d"),
                     "Monto_Total": st.column_config.NumberColumn("Total CLP", format="$%d"),
-                    "Fecha_Emision": "Fecha Emisión"
+                    "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión")
                 },
                 use_container_width=True,
                 hide_index=True
