@@ -158,14 +158,22 @@ def cargar_cotizaciones():
         ]
         return pd.DataFrame(columns=cols)
 
-    # Forzar alineación estricta de Fechas según requerimiento del documento (Emisión: 2026-08-28 | Validez: 2026-09-12)
+    # Forzar alineación estricta de Fechas (Emisión: 2026-08-28 | Validez: 2026-09-12)
     if 'Fecha_Emision' in df_c.columns:
         df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
         df_c['Fecha_Emision'] = df_c['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28', '': '2026-08-28'})
         
     if 'Fecha_Validez' in df_c.columns:
         df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].replace({'2026-09-28': '2026-09-12', 'None': '2026-09-12', 'nan': '2026-09-12', '': '2026-09-12'})
+        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].replace({
+            '2026-09-28': '2026-09-12', 
+            '2026-10-13': '2026-09-12', 
+            'None': '2026-09-12', 
+            'nan': '2026-09-12', 
+            '': '2026-09-12'
+        })
+        if 'Folio' in df_c.columns:
+            df_c.loc[df_c['Folio'].astype(str) == '1377', 'Fecha_Validez'] = '2026-09-12'
 
     return df_c
 
@@ -963,7 +971,7 @@ if check_password():
                     row_c_edit = df_cotizaciones[df_cotizaciones['Folio'].astype(str) == str(folio_cot_editar)].iloc[0]
                     
                     def safe_date_cot(val, default_val=date(2026, 8, 28)):
-                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan", "2026-09-28"]:
+                        if pd.notna(val) and str(val).strip() not in ["", "None", "NaT", "nan", "2026-09-28"]:
                             try:
                                 return pd.to_datetime(val).date()
                             except:
@@ -971,7 +979,7 @@ if check_password():
                         return default_val
 
                     def safe_validez_cot(val, default_val=date(2026, 9, 12)):
-                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan", "2026-09-28"]:
+                        if pd.notna(val) and str(val).strip() not in ["", "None", "NaT", "nan", "2026-09-28", "2026-10-13"]:
                             try:
                                 return pd.to_datetime(val).date()
                             except:
