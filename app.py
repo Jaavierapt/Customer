@@ -1,7 +1,7 @@
 import os
 import io
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import pandas as pd
 import plotly.express as px
 from fpdf import FPDF
@@ -876,13 +876,14 @@ if check_password():
                     cot_fono_ejec = st.text_input("Fono Ejecutivo", value="982065425")
                     
                     c_f1, c_f2 = st.columns(2)
-                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=datetime.now())
-                    cot_f_val = c_f2.date_input("Válido Hasta", value=datetime.now() + timedelta(days=15))
+                    # FECHAS EXTRAÍDAS FIJAS DE LA COTIZACIÓN ADJUNTA
+                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=date(2026, 8, 28))
+                    cot_f_val = c_f2.date_input("Válido Hasta", value=date(2026, 9, 12))
 
                 st.divider()
                 st.subheader("2. Glosa Descriptiva del Servicio")
                 cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", 
-                                         value="Se ejecuta atención de llamado por falla en la visualización de las cámaras de seguridad. Se restaura la visualización y se valida solución.")
+                                         value="Se ejecuta atención de llamado por falla en la visualización de las cámaras de seguridad en dispositivos móviles y computador de secretaria. Se restaura la visualización y se validad con los usuarios la solución del problema.")
 
                 st.divider()
                 st.subheader("3. Detalle por Sección / Items Cotizados")
@@ -893,7 +894,7 @@ if check_password():
                 det_col1, det_col2, det_col3, det_col4 = st.columns([1, 1, 4, 2])
                 cot_cant = det_col1.number_input("Cant.", min_value=1, value=1)
                 cot_uni = det_col2.text_input("Unid.", value="SC")
-                cot_detalle = det_col3.text_input("Detalle del Servicio", value="Servicio de restauración y configuración de IVMS4200 en el Computador de Secretaria y restauración en móviles")
+                cot_detalle = det_col3.text_input("Detalle del Servicio", value="Servicio de restauración y configuración de IVMS4200 en el Computador de Secretaria y restauración de visualización en dispositivos móviles")
                 cot_neto = det_col4.number_input("Valor Neto ($)", min_value=0, step=1000, value=32765)
 
                 # Totales
