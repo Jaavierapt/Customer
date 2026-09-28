@@ -160,11 +160,22 @@ def guardar_cotizacion(dict_cot):
     """Guarda o actualiza cotización en Supabase y archivo local."""
     df_cot = cargar_cotizaciones()
     nueva_cot = pd.DataFrame([dict_cot])
-    df_cot = pd.concat([df_cot[df_cot['Folio'] != dict_cot['Folio']], nueva_cot], ignore_index=True)
+    df_cot = pd.concat([df_cot[df_cot['Folio'].astype(str) != str(dict_cot['Folio'])], nueva_cot], ignore_index=True)
     df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
     
     try:
         supabase.table("cotizaciones").upsert(dict_cot).execute()
+    except Exception:
+        pass
+
+def eliminar_cotizacion(folio_cot):
+    """Elimina una cotización en Supabase y en el archivo local CSV."""
+    df_cot = cargar_cotizaciones()
+    if not df_cot.empty:
+        df_cot = df_cot[df_cot['Folio'].astype(str) != str(folio_cot)]
+        df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
+    try:
+        supabase.table("cotizaciones").delete().eq("Folio", str(folio_cot)).execute()
     except Exception:
         pass
 
@@ -837,7 +848,7 @@ if check_password():
             st.warning("No hay datos suficientes de pagos del año 2026 para ejecutar el Gap Analysis.")
 
     # =========================================================================
-    # NUEVA SECCIÓN: MÓDULO DE COTIZACIONES
+    # SECCIÓN: MÓDULO DE COTIZACIONES (CREAR, EDITAR Y ELIMINAR)
     # =========================================================================
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
@@ -925,6 +936,120 @@ if check_password():
                         st.rerun()
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
+
+        # =====================================================================
+        # APARTADO EDITAR COTIZACIÓN EXISTENTE
+        # =====================================================================
+        with st.expander("✏️ Editar Cotización Existente"):
+            if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
+                folios_cot_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
+                folio_cot_editar = st.selectbox("Selecciona el Folio de Cotización a Editar:", folios_cot_list, key="select_cot_edit")
+                
+                if folio_cot_editar:
+                    row_c_edit = df_cotizaciones[df_cotizaciones['Folio'].astype(str) == str(folio_cot_editar)].iloc[0]
+                    
+                    def safe_date_cot(val):
+                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan"]:
+                            try:
+                                return pd.to_datetime(val).date()
+                            except:
+                                return None
+                        return None
+
+                    with st.form(f"form_edit_cot_{folio_cot_editar}"):
+                        st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
+                        ec_col1, ec_col2, ec_col3 = st.columns(3)
+                        
+                        with ec_col1:
+                            ec_empresa = st.text_input("Empresa", value=str(row_c_edit.get('Empresa', '')))
+                            ec_rut = st.text_input("RUT Cliente", value=str(row_c_edit.get('RUT_Empresa', '')))
+                            ec_planta = st.text_input("Planta", value=str(row_c_edit.get('Planta', '')))
+                            ec_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"],
+                                                       index=["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"].index(row_c_edit.get('Condicion_Pago', 'Contado CLP')) if row_c_edit.get('Condicion_Pago') in ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"] else 0)
+                        
+                        with ec_col2:
+                            ec_contacto = st.text_input("Contacto Cliente", value=str(row_c_edit.get('Contacto', '')))
+                            ec_email_cont = st.text_input("Email Contacto", value=str(row_c_edit.get('Email_Contacto', '')))
+                            ec_fono_cont = st.text_input("Fono Contacto", value=str(row_c_edit.get('Fono_Contacto', '')))
+                            ec_estado = st.selectbox("Estado", ["APROBADA", "PENDIENTE", "RECHAZADA"], 
+                                                     index=["APROBADA", "PENDIENTE", "RECHAZADA"].index(row_c_edit.get('Estado', 'APROBADA')) if row_c_edit.get('Estado') in ["APROBADA", "PENDIENTE", "RECHAZADA"] else 0)
+
+                        with ec_col3:
+                            ec_ejecutivo = st.text_input("Ejecutivo", value=str(row_c_edit.get('Ejecutivo', '')))
+                            ec_email_ejec = st.text_input("Email Ejecutivo", value=str(row_c_edit.get('Email_Ejecutivo', '')))
+                            ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
+                            ec_f_emi = st.date_input("Fecha Emisión", value=safe_date_cot(row_c_edit.get('Fecha_Emision')))
+                            ec_f_val = st.date_input("Válido Hasta", value=safe_date_cot(row_c_edit.get('Fecha_Validez')))
+
+                        ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
+                        
+                        servicios_exist = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                        grp_c_act = str(row_c_edit.get('Grupo_Servicio', '')).strip().upper()
+                        if grp_c_act and grp_c_act not in servicios_exist:
+                            servicios_exist.append(grp_c_act)
+                            servicios_exist = sorted(servicios_exist)
+                        idx_c_grp = servicios_exist.index(grp_c_act) if grp_c_act in servicios_exist else 0
+                        
+                        ec_grupo_serv = st.selectbox("Grupo Servicio", options=servicios_exist, index=idx_c_grp, key=f"edit_grp_serv_cot_{folio_cot_editar}")
+                        
+                        ed_col1, ed_col2, ed_col3, ed_col4 = st.columns([1, 1, 4, 2])
+                        ec_cant = ed_col1.number_input("Cantidad", min_value=1, value=int(row_c_edit.get('Cantidad', 1)))
+                        ec_uni = ed_col2.text_input("Unidad", value=str(row_c_edit.get('Unidad', 'SC')))
+                        ec_detalle = ed_col3.text_input("Detalle Servicio", value=str(row_c_edit.get('Detalle_Servicio', '')))
+                        ec_neto = ed_col4.number_input("Monto Neto ($)", min_value=0, step=1000, value=int(row_c_edit.get('Monto_Neto', 0)))
+
+                        if st.form_submit_button("💾 Guardar Cambios en Cotización"):
+                            c_iva_edit = int(round(ec_neto * 0.19))
+                            c_total_edit = ec_neto + c_iva_edit
+                            
+                            dict_editado = {
+                                "Folio": str(folio_cot_editar).strip(),
+                                "Empresa": ec_empresa.strip().upper(),
+                                "RUT_Empresa": ec_rut.strip(),
+                                "Planta": ec_planta.strip().upper(),
+                                "Contacto": ec_contacto.strip(),
+                                "Email_Contacto": ec_email_cont.strip(),
+                                "Fono_Contacto": ec_fono_cont.strip(),
+                                "Ejecutivo": ec_ejecutivo.strip(),
+                                "Email_Ejecutivo": ec_email_ejec.strip(),
+                                "Fono_Ejecutivo": ec_fono_ejec.strip(),
+                                "Condicion_Pago": ec_condicion,
+                                "Fecha_Emision": str(ec_f_emi) if ec_f_emi else str(row_c_edit.get('Fecha_Emision')),
+                                "Fecha_Validez": str(ec_f_val) if ec_f_val else str(row_c_edit.get('Fecha_Validez')),
+                                "Glosa": ec_glosa.strip(),
+                                "Grupo_Servicio": ec_grupo_serv.upper(),
+                                "Detalle_Servicio": ec_detalle.strip().upper(),
+                                "Cantidad": int(ec_cant),
+                                "Unidad": ec_uni.strip().upper(),
+                                "Monto_Neto": int(ec_neto),
+                                "Monto_IVA": c_iva_edit,
+                                "Monto_Total": c_total_edit,
+                                "Estado": ec_estado
+                            }
+                            guardar_cotizacion(dict_editado)
+                            st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente!")
+                            st.rerun()
+            else:
+                st.info("No hay cotizaciones registradas para editar.")
+
+        # =====================================================================
+        # APARTADO ELIMINAR COTIZACIÓN
+        # =====================================================================
+        with st.expander("🗑️ Eliminar Cotización"):
+            if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
+                folios_del_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
+                folio_cot_del = st.selectbox("Selecciona el Folio de Cotización a Eliminar:", folios_del_list, key="select_cot_del")
+                
+                if folio_cot_del:
+                    row_del = df_cotizaciones[df_cotizaciones['Folio'].astype(str) == str(folio_cot_del)].iloc[0]
+                    st.warning(f"⚠️ ¿Estás seguro de que deseas eliminar permanentemente la Cotización Folio **#{folio_cot_del}** del cliente **{row_del.get('Empresa', 'N/A')}**?")
+                    
+                    if st.button(f"🔥 Confirmar y Eliminar Cotización #{folio_cot_del}", key="btn_confirm_del_cot"):
+                        eliminar_cotizacion(folio_cot_del)
+                        st.success(f"Cotización Folio #{folio_cot_del} eliminada con éxito de Supabase y el sistema local.")
+                        st.rerun()
+            else:
+                st.info("No hay cotizaciones registradas para eliminar.")
 
         st.divider()
 
