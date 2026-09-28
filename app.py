@@ -544,18 +544,6 @@ if check_password():
             df['Semáforo'] = df.apply(calcular_semaforo_avanzado, axis=1)
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
-           
-        st.subheader("🚨 Alertas de Cobranza Urgentes")
-        df['Semáforo'] = df['Semáforo'].astype(str)
-        df_criticos = df[df['Semáforo'].str.contains('Rojo|Amarillo', na=False)]
-        if not df_criticos.empty:
-            st.warning(f"Tienes **{len(df_criticos)} documentos** que requieren gestión de cobranza inmediata.")
-            with st.expander("Ver detalle de alertas pendientes"):
-                st.dataframe(df_criticos[['Empresa', 'Planta', 'Factura', 'Monto', 'Fecha_Vencimiento', 'Semáforo']], hide_index=True)
-        else:
-            st.success("🎉 ¡Excelente! No hay documentos críticos ni vencidos en este momento.")
-
-        st.divider()
 
         st.subheader("🔎 Buscador Global Rápido")
         busqueda_global = st.text_input("Escribe una palabra clave (empresa, factura, servicio, planta):", key="global_search_input")
@@ -826,47 +814,6 @@ if check_password():
                 st.info("💡 **Estrategia ABC:** Cuida y mantén la relación cercana con tus clientes **Clase A** basándote en su aporte real de caja.")
 
         st.divider()
-
-        st.write("### 🔍 Mix del Cliente vs. Mix Promedio de la Empresa (Ingresos Reales)")
-       
-        if not df_2026.empty:
-            total_general_2026 = df_2026['Monto'].sum()
-            if total_general_2026 > 0:
-                mix_global = df_2026.groupby('Grupo Servicio')['Monto'].sum() / total_general_2026 * 100
-            else:
-                mix_global = pd.Series(dtype=float)
-
-            empresas_2026 = sorted(df_2026['Empresa'].unique())
-            c_g1, c_g2 = st.columns(2)
-            with c_g1:
-                empresa_gap = st.selectbox("Selecciona empresa para brechas:", empresas_2026, key="select_gap_empresa")
-           
-            plantas_gap_disponibles = sorted(df_2026[df_2026['Empresa'] == empresa_gap]['Planta'].unique())
-            with c_g2:
-                planta_gap = st.selectbox("Selecciona planta específica:", plantas_gap_disponibles, key="select_gap_planta")
-           
-            df_planta_gap = df_2026[(df_2026['Empresa'] == empresa_gap) & (df_2026['Planta'] == planta_gap)]
-            total_planta = df_planta_gap['Monto'].sum()
-           
-            if total_planta > 0:
-                mix_planta = df_planta_gap.groupby('Grupo Servicio')['Monto'].sum() / total_planta * 100
-            else:
-                mix_planta = pd.Series(dtype=float)
-
-            df_gap = pd.DataFrame({
-                'Mix Promedio Empresa (%)': mix_global,
-                f'Mix Actual {empresa_gap} - {planta_gap} (%)': mix_planta
-            }).fillna(0)
-           
-            df_gap['Brecha / Oportunidad (%)'] = df_gap['Mix Promedio Empresa (%)'] - df_gap[f'Mix Actual {empresa_gap} - {planta_gap} (%)']
-            df_gap = df_gap.sort_values(by='Brecha / Oportunidad (%)', ascending=False)
-
-            df_gap_display = df_gap.map(lambda x: f"{x:.2f}%")
-           
-            st.dataframe(df_gap_display, use_container_width=True)
-            st.info(f"💡 **Gap Analysis (Pagos):** Muestra qué servicios tienen mayor peso en la recaudación general respecto a la planta **{planta_gap}** de **{empresa_gap}**.")
-        else:
-            st.warning("No hay datos suficientes de pagos del año 2026 para ejecutar el Gap Analysis.")
 
     # =========================================================================
     # SECCIÓN: MÓDULO DE COTIZACIONES (CREAR, EDITAR Y ELIMINAR)
