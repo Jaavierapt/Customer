@@ -1064,8 +1064,9 @@ if check_password():
             
             xml_folio = ""
             xml_empresa = ""
-            xml_monto = 0
+            xml_monto_neto = 0
             xml_fecha_emi = None
+            xml_fecha_venc = None
             xml_detalle = ""
 
             if archivo_xml is not None:
@@ -1078,10 +1079,11 @@ if check_password():
                         if '}' in elem.tag:
                             elem.tag = elem.tag.split('}', 1)[1]
                     
+                    # 1. Folio
                     folio_elem = root.find(".//Folio")
                     xml_folio = folio_elem.text.strip() if folio_elem is not None and folio_elem.text else ""
                     
-                    # Razón Social (Receptor o Emisor)
+                    # 2. Razón Social (Empresa)
                     recep_elem = root.find(".//RznSocRecep")
                     emisor_elem = root.find(".//RznSoc")
                     if recep_elem is not None and recep_elem.text:
@@ -1089,13 +1091,15 @@ if check_password():
                     elif emisor_elem is not None and emisor_elem.text:
                         xml_empresa = emisor_elem.text.strip().upper()
                         
-                    monto_elem = root.find(".//MntTotal")
-                    if monto_elem is not None and monto_elem.text:
+                    # 3. Monto Neto (Se cambia MntTotal por MntNeto)
+                    neto_elem = root.find(".//MntNeto")
+                    if neto_elem is not None and neto_elem.text:
                         try:
-                            xml_monto = int(round(float(monto_elem.text.strip())))
+                            xml_monto_neto = int(round(float(neto_elem.text.strip())))
                         except:
-                            xml_monto = 0
+                            xml_monto_neto = 0
 
+                    # 4. Fecha Emisión y Vencimiento
                     fch_elem = root.find(".//FchEmis")
                     if fch_elem is not None and fch_elem.text:
                         try:
@@ -1103,14 +1107,38 @@ if check_password():
                         except:
                             xml_fecha_emi = None
 
+                    fch_venc_elem = root.find(".//FchVenc")
+                    if fch_venc_elem is not None and fch_venc_elem.text:
+                        try:
+                            xml_fecha_venc = pd.to_datetime(fch_venc_elem.text.strip()).date()
+                        except:
+                            xml_fecha_venc = None
+                    elif xml_fecha_emi:
+                        # Si el XML no trae vencimiento explícito, se proyecta a 30 días
+                        xml_fecha_venc = xml_fecha_emi + timedelta(days=30)
+
+                    # 5. Detalle del Servicio (Extrae todos los nombres y descripciones de ítems)
                     detalles_items = []
-                    for item in root.findall(".//NmbItem"):
-                        if item.text:
-                            detalles_items.append(item.text.strip())
+                    for item in root.findall(".//DchItem"):
+                        nmb = item.find("NmbItem")
+                        dsc = item.find("DscrItem")
+                        txt_item = ""
+                        if nmb is not None and nmb.text:
+                            txt_item += nmb.text.strip()
+                        if dsc is not None and dsc.text:
+                            txt_item += f" ({dsc.text.strip()})" if txt_item else dsc.text.strip()
+                        if txt_item:
+                            detalles_items.append(txt_item)
+
+                    if not detalles_items:
+                        for nmb in root.findall(".//NmbItem"):
+                            if nmb.text:
+                                detalles_items.append(nmb.text.strip())
+
                     if detalles_items:
                         xml_detalle = " / ".join(detalles_items).upper()
 
-                    st.success(f"✅ Factura N° {xml_folio} ({xml_empresa}) leída correctamente. Datos cargados en el formulario de abajo.")
+                    st.success(f"✅ Factura N° {xml_folio} ({xml_empresa}) leída correctamente. Monto Neto: ${xml_monto_neto:,.0f}".replace(",", "."))
                 except Exception as e:
                     st.error(f"Error al procesar el archivo XML: {e}")
 
@@ -1132,9 +1160,10 @@ if check_password():
             p_planta = ""
             p_grupo_serv = "SERVICIO GENERAL"
             p_detalle = xml_detalle if xml_detalle else ""
-            p_monto = xml_monto if xml_monto > 0 else 0
+            p_monto = xml_monto_neto if xml_monto_neto > 0 else 0
             p_fecha_cot = date(2026, 8, 28)
             p_fecha_emi = xml_fecha_emi
+            p_fecha_venc = xml_fecha_venc
             
             if cot_sel != "--- Sin Enlace ---":
                 row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
@@ -1165,7 +1194,7 @@ if check_password():
                     n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp_p, key="n_grupo_serv_input")
                     
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", value=p_detalle, key="n_serv_det_input")
-                    n_monto = st.number_input("Monto ($)", min_value=0, step=1000, value=p_monto)
+                    n_monto = st.number_input("Monto Neto ($)", min_value=0, step=1000, value=p_monto)
                     
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
                     n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
@@ -1180,7 +1209,7 @@ if check_password():
                     n_f_cot = st.date_input("Fecha Cotización", value=p_fecha_cot)
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
                     n_f_emi = st.date_input("Fecha Emisión", value=p_fecha_emi)
-                    n_f_venc = st.date_input("Fecha Vencimiento", value=None)
+                    n_f_venc = st.date_input("Fecha Vencimiento", value=p_fecha_venc)
                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
@@ -1267,7 +1296,7 @@ if check_password():
                             e_servicio_detalle = st.text_input("Servicio (Detalle)", value=str(row_edit.get('Servicio', '')))
                             
                             monto_val = row_edit.get('Monto', 0)
-                            e_monto = st.number_input("Monto ($)", min_value=0, value=int(monto_val) if pd.notna(monto_val) else 0, step=1000)
+                            e_monto = st.number_input("Monto Neto ($)", min_value=0, value=int(monto_val) if pd.notna(monto_val) else 0, step=1000)
                             
                             prog_val = row_edit.get('dias_programados', row_edit.get('Dias_Programados', 0.0))
                             e_dias_prog = st.number_input("Días Programados", min_value=0.0, value=float(prog_val) if pd.notna(prog_val) else 0.0, step=1.0)
@@ -1393,7 +1422,7 @@ if check_password():
                         st.markdown(f"**Planta:** {row_det.get('Planta', 'N/A')}")
                         st.markdown(f"**Grupo de Servicio:** {row_det.get('Grupo Servicio', 'N/A')}")
                         st.markdown(f"**Servicio Entregado:** {row_det.get('Servicio', 'N/A')}")
-                        st.markdown(f"**Monto:** {monto_det_str}")
+                        st.markdown(f"**Monto Neto:** {monto_det_str}")
                         st.markdown(f"**Días Programados:** {d_prog}")
                         st.markdown(f"**Días Reales:** {d_real}")
                         st.markdown(f"**Desviación de Ejecución:** {desviacion:+g} días")
@@ -1422,7 +1451,7 @@ if check_password():
              
             configuracion_columnas = {
                 "Monto": st.column_config.NumberColumn(
-                    "Monto ($)",
+                    "Monto Neto ($)",
                     format="$%d"
                 ),
                 "Estado": st.column_config.SelectboxColumn(
