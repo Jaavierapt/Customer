@@ -1,6 +1,7 @@
 import os
 import io
 import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
 import pandas as pd
 import plotly.express as px
@@ -1055,7 +1056,68 @@ if check_password():
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
         # =====================================================================
-        # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES)
+        # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS XML (DTE)
+        # =====================================================================
+        with st.expander("📄 Cargar Importar Factura desde Archivo XML (DTE)", expanded=False):
+            st.write("Sube el archivo XML del Documento Tributario Electrónico (DTE) emitido o recibido para registrar la factura de forma automática.")
+            archivo_xml = st.file_uploader("Seleccionar archivo XML DTE", type=["xml"], key="uploader_xml_factura")
+            
+            xml_folio = ""
+            xml_empresa = ""
+            xml_monto = 0
+            xml_fecha_emi = None
+            xml_detalle = ""
+
+            if archivo_xml is not None:
+                try:
+                    tree = ET.parse(archivo_xml)
+                    root = tree.getroot()
+                    
+                    # Eliminar namespaces de las etiquetas para facilitar búsqueda universal
+                    for elem in root.iter():
+                        if '}' in elem.tag:
+                            elem.tag = elem.tag.split('}', 1)[1]
+                    
+                    folio_elem = root.find(".//Folio")
+                    xml_folio = folio_elem.text.strip() if folio_elem is not None and folio_elem.text else ""
+                    
+                    # Razón Social (Receptor o Emisor)
+                    recep_elem = root.find(".//RznSocRecep")
+                    emisor_elem = root.find(".//RznSoc")
+                    if recep_elem is not None and recep_elem.text:
+                        xml_empresa = recep_elem.text.strip().upper()
+                    elif emisor_elem is not None and emisor_elem.text:
+                        xml_empresa = emisor_elem.text.strip().upper()
+                        
+                    monto_elem = root.find(".//MntTotal")
+                    if monto_elem is not None and monto_elem.text:
+                        try:
+                            xml_monto = int(round(float(monto_elem.text.strip())))
+                        except:
+                            xml_monto = 0
+
+                    fch_elem = root.find(".//FchEmis")
+                    if fch_elem is not None and fch_elem.text:
+                        try:
+                            xml_fecha_emi = pd.to_datetime(fch_elem.text.strip()).date()
+                        except:
+                            xml_fecha_emi = None
+
+                    detalles_items = []
+                    for item in root.findall(".//NmbItem"):
+                        if item.text:
+                            detalles_items.append(item.text.strip())
+                    if detalles_items:
+                        xml_detalle = " / ".join(detalles_items).upper()
+
+                    st.success(f"✅ Factura N° {xml_folio} ({xml_empresa}) leída correctamente. Datos cargados en el formulario de abajo.")
+                except Exception as e:
+                    st.error(f"Error al procesar el archivo XML: {e}")
+
+        st.divider()
+
+        # =====================================================================
+        # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES O XML)
         # =====================================================================
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
             
@@ -1065,12 +1127,14 @@ if check_password():
             cot_sel = st.selectbox("Seleccionar Cotización para importar datos:", ["--- Sin Enlace ---"] + cotizaciones_list, key="select_cot_to_fact")
             
             # Precarga de variables
-            p_empresa = ""
+            p_factura = xml_folio
+            p_empresa = xml_empresa if xml_empresa else ""
             p_planta = ""
             p_grupo_serv = "SERVICIO GENERAL"
-            p_detalle = ""
-            p_monto = 0
+            p_detalle = xml_detalle if xml_detalle else ""
+            p_monto = xml_monto if xml_monto > 0 else 0
             p_fecha_cot = date(2026, 8, 28)
+            p_fecha_emi = xml_fecha_emi
             
             if cot_sel != "--- Sin Enlace ---":
                 row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
@@ -1088,7 +1152,7 @@ if check_password():
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
                 with fc1:
-                    n_factura = st.text_input("Número de Factura / Documento")
+                    n_factura = st.text_input("Número de Factura / Documento", value=p_factura)
                     n_empresa_ins = st.text_input("Empresa", value=p_empresa)
                     n_planta_ins = st.text_input("Planta", value=p_planta)
                     
@@ -1115,7 +1179,7 @@ if check_password():
                         
                     n_f_cot = st.date_input("Fecha Cotización", value=p_fecha_cot)
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
-                    n_f_emi = st.date_input("Fecha Emisión", value=None)
+                    n_f_emi = st.date_input("Fecha Emisión", value=p_fecha_emi)
                     n_f_venc = st.date_input("Fecha Vencimiento", value=None)
                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
