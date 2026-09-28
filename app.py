@@ -158,15 +158,14 @@ def cargar_cotizaciones():
         ]
         return pd.DataFrame(columns=cols)
 
-    # Forzar alineación de fecha según requerimiento del documento (2026-08-28)
+    # Forzar alineación estricta de Fechas según requerimiento del documento (Emisión: 2026-08-28 | Validez: 2026-09-12)
     if 'Fecha_Emision' in df_c.columns:
         df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-        # Corrección explícita de registros que traigan fecha actual
-        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28'})
+        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28', '': '2026-08-28'})
         
     if 'Fecha_Validez' in df_c.columns:
         df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].replace({'2026-09-28': '2026-09-12', 'None': '2026-09-12', 'nan': '2026-09-12'})
+        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].replace({'2026-09-28': '2026-09-12', 'None': '2026-09-12', 'nan': '2026-09-12', '': '2026-09-12'})
 
     return df_c
 
@@ -971,6 +970,14 @@ if check_password():
                                 return default_val
                         return default_val
 
+                    def safe_validez_cot(val, default_val=date(2026, 9, 12)):
+                        if pd.notna(val) and str(val).strip() != "" and str(val) not in ["None", "NaT", "nan", "2026-09-28"]:
+                            try:
+                                return pd.to_datetime(val).date()
+                            except:
+                                return default_val
+                        return default_val
+
                     with st.form(f"form_edit_cot_{folio_cot_editar}"):
                         st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
                         ec_col1, ec_col2, ec_col3 = st.columns(3)
@@ -994,7 +1001,7 @@ if check_password():
                             ec_email_ejec = st.text_input("Email Ejecutivo", value=str(row_c_edit.get('Email_Ejecutivo', '')))
                             ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
                             ec_f_emi = st.date_input("Fecha Emisión", value=safe_date_cot(row_c_edit.get('Fecha_Emision'), date(2026, 8, 28)))
-                            ec_f_val = st.date_input("Válido Hasta", value=safe_date_cot(row_c_edit.get('Fecha_Validez'), date(2026, 9, 12)))
+                            ec_f_val = st.date_input("Válido Hasta", value=safe_validez_cot(row_c_edit.get('Fecha_Validez'), date(2026, 9, 12)))
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
                         
