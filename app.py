@@ -12,6 +12,15 @@ import matplotlib.pyplot as plt
 from supabase import create_client, Client
 import streamlit as st
 
+# Importación segura para lectura de PDF de cotizaciones
+try:
+    import pypdf
+except ImportError:
+    try:
+        import PyPDF2 as pypdf
+    except ImportError:
+        pypdf = None
+
 # --- CONFIGURACIÓN ÚNICA AL INICIO ---
 st.set_page_config(page_title="Itelcam CRM", layout="wide")
 
@@ -60,7 +69,7 @@ def cargar_datos():
             df = df.rename(columns={col_mes: 'Mes'})
             break
     
-    # Limpieza robusta de montos evitando duplicación/multiplicación por eliminación accidental de puntos
+    # Limpieza robusta de montos
     if 'Monto' in df.columns:
         def limpiar_monto_entero(val):
             if pd.isna(val) or val is None:
@@ -86,7 +95,7 @@ def cargar_datos():
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # Asignación de Año y Mes basados en la Fecha de Pago o Fecha de Emisión
+    # Asignación de Año y Mes
     if 'Año' not in df.columns or df['Año'].isna().all() or (df['Año'] == 0).all():
         df['Año'] = df['Fecha_Pago'].dt.year.fillna(df['Fecha_Emision'].dt.year).fillna(0).astype(int)
     else:
@@ -115,6 +124,15 @@ def cargar_datos():
         df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
          
     return df
+
+def eliminar_factura(numero_factura):
+    """Elimina una factura directamente desde Supabase."""
+    try:
+        supabase.table("ingresos").delete().eq("Factura", str(numero_factura)).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar la factura: {e}")
+        return False
 
 def cargar_contactos():
     """Consulta todos los registros de la tabla 'Contactos' en Supabase."""
@@ -159,7 +177,6 @@ def cargar_cotizaciones():
         ]
         return pd.DataFrame(columns=cols)
 
-    # Forzar alineación estricta de Fechas (Emisión: 2026-08-28 | Validez: 2026-09-12)
     if 'Fecha_Emision' in df_c.columns:
         df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
         df_c['Fecha_Emision'] = df_c['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28', '': '2026-08-28'})
@@ -445,7 +462,6 @@ if check_password():
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
        
-        # Descarga de reporte PDF conectada directamente a Supabase
         if st.button("📥 Descargar Reporte PDF"):
             df_pdf = cargar_datos()
             st.download_button("📥 Confirmar Descarga PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
@@ -460,13 +476,11 @@ if check_password():
             st.session_state["logged_in"] = False
             st.rerun()
 
-    # --- TÍTULO PRINCIPAL DEL DASHBOARD ---
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
     if not os.path.exists(ARCHIVO_CONTACTOS):
         pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
      
-    # Manejo de contactos local (CSV para tab 5)
     df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
    
     if 'Rol_Contacto' not in df_contactos.columns:
@@ -495,7 +509,6 @@ if check_password():
             if not df_sin_pagar.empty:
                 df_sin_pagar['Dias_Restantes'] = (df_sin_pagar['Fecha_Vencimiento'] - hoy_alerta).dt.days
                 
-                # 1. Facturas ya VENCIDAS (Días restantes menores a 0)
                 df_vencidas = df_sin_pagar[df_sin_pagar['Dias_Restantes'] < 0].copy()
                 if not df_vencidas.empty:
                     df_vencidas['Dias_Atraso'] = df_vencidas['Dias_Restantes'].abs()
@@ -509,7 +522,6 @@ if check_password():
                         use_container_width=True
                     )
                 
-                # 2. Facturas Próximas a Vencer (Entre 0 y 30 días)
                 df_proximos = df_sin_pagar[(df_sin_pagar['Dias_Restantes'] >= 0) & (df_sin_pagar['Dias_Restantes'] <= 30)].sort_values(by='Dias_Restantes', ascending=True)
                 if not df_proximos.empty:
                     st.warning(f"⚠️ Hay **{len(df_proximos)} contratos/facturas** que vencen en los próximos 30 días. ¡Contacta al cliente para asegurar la renovación!")
@@ -822,19 +834,73 @@ if check_password():
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
 
+        # --- LECTURA E IMPORTACIÓN DE COTIZACIÓN PDF ---
+        p_pdf_folio = f"137{len(df_cotizaciones)+7}"
+        p_pdf_empresa = "EDUCACION Y CAPACITACION VICTOR EDGARDO MORALES CIFRAS E.I.R.L"
+        p_pdf_rut = "76608422-2"
+        p_pdf_planta = "RANCAGUA"
+        p_pdf_contacto = "VICTOR EDGARDO MORALES CIFRAS"
+        p_pdf_neto = 32765
+        p_pdf_glosa = "Se ejecuta atención de llamado por falla en la visualización de las cámaras de seguridad en dispositivos móviles y computador de secretaria. Se restaura la visualización y se validad con los usuarios la solución del problema."
+        p_pdf_detalle = "Servicio de restauración y configuración de IVMS4200 en el Computador de Secretaria y restauración de visualización en dispositivos móviles"
+
+        with st.expander("📄 Cargar e Importar Cotización desde Archivo PDF", expanded=False):
+            st.write("Sube el PDF de una cotización emitida para extraer automáticamente su información.")
+            archivo_pdf_cot = st.file_uploader("Seleccionar archivo PDF Cotización", type=["pdf"], key="uploader_pdf_cotizacion")
+            
+            if archivo_pdf_cot is not None:
+                if pypdf is None:
+                    st.error("Error: La librería 'pypdf' o 'PyPDF2' no está disponible para procesar archivos PDF.")
+                else:
+                    try:
+                        reader = pypdf.PdfReader(archivo_pdf_cot)
+                        texto_extraido = ""
+                        for page in reader.pages:
+                            txt_p = page.extract_text()
+                            if txt_p:
+                                texto_extraido += txt_p + "\n"
+
+                        if texto_extraido:
+                            import re
+                            
+                            # Folio
+                            match_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
+                            if match_folio:
+                                p_pdf_folio = match_folio.group(1)
+
+                            # RUT
+                            match_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
+                            if match_rut:
+                                p_pdf_rut = match_rut.group(1)
+
+                            # Monto Neto
+                            match_neto = re.search(r'(?:Neto|Subtotal)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
+                            if match_neto:
+                                try:
+                                    limp = match_neto.group(1).replace('.', '').replace(',', '.')
+                                    p_pdf_neto = int(round(float(limp)))
+                                except:
+                                    pass
+
+                            st.success("✅ Archivo PDF procesado exitosamente. Datos precargados en el formulario de creación.")
+                        else:
+                            st.warning("No se pudo extraer texto legible del PDF.")
+                    except Exception as e:
+                        st.error(f"Error al leer el archivo PDF: {e}")
+
         with st.expander("➕ Generar Nueva Cotización (Estructura Documento)", expanded=False):
             with st.form("form_nueva_cotizacion", clear_on_submit=True):
                 st.subheader("1. Identificación y Encabezado del Documento")
                 c_head1, c_head2, c_head3 = st.columns(3)
                 
                 with c_head1:
-                    cot_folio = st.text_input("Folio N° *", value=f"137{len(df_cotizaciones)+7}")
-                    cot_empresa = st.text_input("Empresa (Cliente) *", value="EDUCACION Y CAPACITACION VICTOR EDGARDO MORALES CIFRAS E.I.R.L")
-                    cot_rut = st.text_input("RUT Cliente *", value="76608422-2")
-                    cot_planta = st.text_input("Planta / Sucursal", value="RANCAGUA")
+                    cot_folio = st.text_input("Folio N° *", value=p_pdf_folio)
+                    cot_empresa = st.text_input("Empresa (Cliente) *", value=p_pdf_empresa)
+                    cot_rut = st.text_input("RUT Cliente *", value=p_pdf_rut)
+                    cot_planta = st.text_input("Planta / Sucursal", value=p_pdf_planta)
                 
                 with c_head2:
-                    cot_contacto = st.text_input("Nombre Contacto Cliente", value="VICTOR EDGARDO MORALES CIFRAS")
+                    cot_contacto = st.text_input("Nombre Contacto Cliente", value=p_pdf_contacto)
                     cot_email_cont = st.text_input("Email Contacto", value="")
                     cot_fono_cont = st.text_input("Fono Contacto", value="982065425")
                     cot_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"])
@@ -850,8 +916,7 @@ if check_password():
 
                 st.divider()
                 st.subheader("2. Glosa Descriptiva del Servicio")
-                cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", 
-                                         value="Se ejecuta atención de llamado por falla en la visualización de las cámaras de seguridad en dispositivos móviles y computador de secretaria. Se restaura la visualización y se validad con los usuarios la solución del problema.")
+                cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", value=p_pdf_glosa)
 
                 st.divider()
                 st.subheader("3. Detalle por Sección / Items Cotizados")
@@ -862,8 +927,8 @@ if check_password():
                 det_col1, det_col2, det_col3, det_col4 = st.columns([1, 1, 4, 2])
                 cot_cant = det_col1.number_input("Cant.", min_value=1, value=1)
                 cot_uni = det_col2.text_input("Unid.", value="SC")
-                cot_detalle = det_col3.text_input("Detalle del Servicio", value="Servicio de restauración y configuración de IVMS4200 en el Computador de Secretaria y restauración de visualización en dispositivos móviles")
-                cot_neto = det_col4.number_input("Valor Neto ($)", min_value=0, step=1000, value=32765)
+                cot_detalle = det_col3.text_input("Detalle del Servicio", value=p_pdf_detalle)
+                cot_neto = det_col4.number_input("Valor Neto ($)", min_value=0, step=1000, value=p_pdf_neto)
 
                 # Totales
                 calc_iva = int(round(cot_neto * 0.19))
@@ -1074,16 +1139,13 @@ if check_password():
                     tree = ET.parse(archivo_xml)
                     root = tree.getroot()
                     
-                    # Eliminar namespaces de las etiquetas para facilitar búsqueda universal
                     for elem in root.iter():
                         if '}' in elem.tag:
                             elem.tag = elem.tag.split('}', 1)[1]
                     
-                    # 1. Folio
                     folio_elem = root.find(".//Folio")
                     xml_folio = folio_elem.text.strip() if folio_elem is not None and folio_elem.text else ""
                     
-                    # 2. Razón Social (Empresa)
                     recep_elem = root.find(".//RznSocRecep")
                     emisor_elem = root.find(".//RznSoc")
                     if recep_elem is not None and recep_elem.text:
@@ -1091,7 +1153,6 @@ if check_password():
                     elif emisor_elem is not None and emisor_elem.text:
                         xml_empresa = emisor_elem.text.strip().upper()
                         
-                    # 3. Monto Neto
                     neto_elem = root.find(".//MntNeto")
                     if neto_elem is not None and neto_elem.text:
                         try:
@@ -1099,7 +1160,6 @@ if check_password():
                         except:
                             xml_monto_neto = 0
 
-                    # 4. Fecha Emisión y Vencimiento
                     fch_elem = root.find(".//FchEmis")
                     if fch_elem is not None and fch_elem.text:
                         try:
@@ -1116,7 +1176,6 @@ if check_password():
                     elif xml_fecha_emi:
                         xml_fecha_venc = xml_fecha_emi + timedelta(days=30)
 
-                    # 5. Detalle del Servicio
                     detalles_items = []
                     for item in root.findall(".//DchItem"):
                         nmb = item.find("NmbItem")
@@ -1147,13 +1206,10 @@ if check_password():
         # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES O XML)
         # =====================================================================
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
-            
-            # Sub-sección para importar desde cotización
             st.markdown("### 🔗 Enlazar desde Cotización Existente (Opcional)")
             cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
             cot_sel = st.selectbox("Seleccionar Cotización para importar datos:", ["--- Sin Enlace ---"] + cotizaciones_list, key="select_cot_to_fact")
             
-            # Precarga de variables
             p_factura = xml_folio
             p_empresa = xml_empresa if xml_empresa else ""
             p_planta = ""
@@ -1217,7 +1273,6 @@ if check_password():
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
-                        # Cálculo seguro de Año y Mes basados en la fecha de pago o emisión
                         fecha_referencia = fecha_pago_final if pd.notna(fecha_pago_final) else (pd.to_datetime(n_f_emi) if n_f_emi else None)
                         anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
                         mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
@@ -1368,6 +1423,26 @@ if check_password():
             else:
                 st.info("No hay facturas registradas para editar.")
 
+        # =====================================================================
+        # APARTADO ELIMINAR FACTURA
+        # =====================================================================
+        with st.expander("🗑️ Eliminar Factura"):
+            if not df.empty and 'Factura' in df.columns:
+                facturas_del_list = sorted(df['Factura'].astype(str).unique().tolist())
+                factura_a_eliminar = st.selectbox("Selecciona el Número de Factura a Eliminar:", facturas_del_list, key="select_factura_del")
+                
+                if factura_a_eliminar:
+                    row_f_del = df[df['Factura'].astype(str) == str(factura_a_eliminar)].iloc[0]
+                    st.warning(f"⚠️ ¿Estás seguro de que deseas eliminar permanentemente la Factura N° **#{factura_a_eliminar}** de la empresa **{row_f_del.get('Empresa', 'N/A')}**?")
+                    
+                    if st.button(f"🔥 Confirmar y Eliminar Factura #{factura_a_eliminar}", key="btn_confirm_del_factura"):
+                        if eliminar_factura(factura_a_eliminar):
+                            st.cache_data.clear()
+                            st.success(f"Factura #{factura_a_eliminar} eliminada exitosamente de Supabase.")
+                            st.rerun()
+            else:
+                st.info("No hay facturas registradas para eliminar.")
+
         st.divider()
 
         if 'Fecha_Vencimiento' in df.columns:
@@ -1383,16 +1458,13 @@ if check_password():
         df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
           
         if not df.empty:
-            # 1. Menú desplegable preliminar para elegir la factura y ver su detalle completo
             st.write("### 🔍 Detalle Extendido por Factura")
             lista_facturas = df['Factura'].astype(str).tolist() if 'Factura' in df.columns else []
             if lista_facturas:
                 factura_seleccionada = st.selectbox("Selecciona una factura del historial para ver su información detallada:", lista_facturas)
                  
-                # Filtrar la fila correspondiente
                 row_det = df[df['Factura'].astype(str) == str(factura_seleccionada)].iloc[0]
                  
-                # Cálculo de KPIs de eficiencia y cobro para el detalle evitando errores de nulos
                 d_prog = row_det.get('dias_programados', 0)
                 if pd.isna(d_prog):
                     d_prog = row_det.get('Dias_Programados', 0)
@@ -1411,7 +1483,6 @@ if check_password():
                 
                 monto_det_str = f"${int(row_det.get('Monto', 0)):,.0f}".replace(",", ".")
                 
-                # Desplegable con todo el detalle técnico solicitado
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
                      
@@ -1443,7 +1514,6 @@ if check_password():
 
             st.divider()
 
-            # 2. Tabla general limpia y simplificada (Número, Empresa, Planta, Monto, Estado)
             st.write("### 📋 Listado General Preliminar")
             columnas_esenciales = [col for col in ['Factura', 'Empresa', 'Planta', 'Monto', 'Estado'] if col in df.columns]
              
@@ -1494,12 +1564,10 @@ if check_password():
         # =====================================================================
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
           
-        # 1. Tasa de Conversión (Ganados / Total no perdidos o total histórico)
         total_contactos = len(df_contactos)
         total_ganados = len(df_contactos[df_contactos['Estado'] == 'Ganado']) if total_contactos > 0 else 0
         tasa_conversion = (total_ganados / total_contactos * 100) if total_contactos > 0 else 0
           
-        # 2. Tasa de Retención y Recurrencia (Clientes con más de 1 servicio/factura registrada)
         if not df.empty and 'Empresa' in df.columns:
             conteo_por_empresa = df['Empresa'].value_counts()
             clientes_recurrentes = len(conteo_por_empresa[conteo_por_empresa > 1])
@@ -1516,7 +1584,6 @@ if check_password():
             pct_clientes_rec = 0.0
             pct_servicios_rec = 0.0
 
-        # 3. Tiempo de Respuesta
         promedio_dias_respuesta = 0.0
         if not df_interacciones.empty:
             try:
@@ -1538,9 +1605,6 @@ if check_password():
 
         st.divider()
 
-        # =====================================================================
-        # FORMULARIO UNIFICADO (LOCAL + SUPABASE) 
-        # =====================================================================
         with st.expander("➕ Crear Nuevo Contacto", expanded=True):
             with st.form("form_contacto_unificado"):
                 c1, c2 = st.columns(2)
