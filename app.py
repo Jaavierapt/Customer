@@ -881,56 +881,87 @@ if check_password():
                         if texto_extraido:
                             import re
                             
-                            # Extraer Folio
-                            match_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
-                            if match_folio:
-                                p_pdf_folio = match_folio.group(1).strip()
+                            lines = [line.strip() for line in texto_extraido.split("\n") if line.strip()]
 
-                            # Extraer RUT
-                            match_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
-                            if match_rut:
-                                p_pdf_rut = match_rut.group(1).strip()
+                            # 1. Extraer Folio
+                            m_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
+                            if m_folio:
+                                p_pdf_folio = m_folio.group(1).strip()
 
-                            # Extraer Monto Neto
-                            match_neto = re.search(r'(?:Neto|Subtotal)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
-                            if match_neto:
+                            # 2. Extraer RUT
+                            m_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
+                            if m_rut:
+                                p_pdf_rut = m_rut.group(1).strip()
+
+                            # 3. Extraer Monto Neto
+                            m_neto = re.search(r'(?:Neto|Subtotal|Sub-Total)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
+                            if m_neto:
                                 try:
-                                    limp = match_neto.group(1).replace('.', '').replace(',', '.')
+                                    limp = m_neto.group(1).replace('.', '').replace(',', '.')
                                     p_pdf_neto = int(round(float(limp)))
                                 except:
                                     pass
 
-                            # Extraer Ejecutivo Comercial y sus datos de contacto dinámicamente
-                            match_ejec = re.search(r'(?:Ejecutivo|Atendida por|Vendedor|Emitido por)\s*[:#]?\s*([A-Za-zÁÉÍÓÚáéíóúÑñ\s]{3,40})', texto_extraido, re.IGNORECASE)
-                            if match_ejec:
-                                p_pdf_ejecutivo = match_ejec.group(1).strip()
-
-                            # Extraer Emails del documento
-                            emails_found = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
-                            for em in emails_found:
+                            # 4. Extraer Emails
+                            emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
+                            for em in emails:
                                 if "itelcam" in em.lower():
                                     p_pdf_email_ejec = em
-                                else:
+                                elif not p_pdf_email_cont:
                                     p_pdf_email_cont = em
 
-                            # Extraer Teléfonos
-                            fonos_found = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
-                            if len(fonos_found) >= 1:
-                                p_pdf_fono_ejec = fonos_found[0].replace(" ", "")
-                            if len(fonos_found) >= 2:
-                                p_pdf_fono_cont = fonos_found[1].replace(" ", "")
+                            # 5. Extraer Teléfonos
+                            fonos = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
+                            if len(fonos) >= 1:
+                                p_pdf_fono_ejec = fonos[0].replace(" ", "")
+                            if len(fonos) >= 2:
+                                p_pdf_fono_cont = fonos[1].replace(" ", "")
 
-                            # Extraer Nombre Cliente / Empresa
-                            match_emp = re.search(r'(?:Empresa|Cliente|Señor(?:es)?)\s*[:#]?\s*([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\.\&\-]{3,60})', texto_extraido, re.IGNORECASE)
-                            if match_emp:
-                                p_pdf_empresa = match_emp.group(1).strip().upper()
+                            # 6. Escaneo por Líneas para Campos Complejos (Empresa, Contacto, Ejecutivo, Glosa)
+                            for i, l in enumerate(lines):
+                                # Empresa / Cliente
+                                if re.search(r'^(?:Señor|Señores|Cliente|Empresa|Razon Social)\b', l, re.IGNORECASE):
+                                    val = l.split(":", 1)[-1].strip()
+                                    if len(val) > 3 and not re.search(r'^(?:Señor|Cliente|Empresa)', val, re.IGNORECASE):
+                                        p_pdf_empresa = val.upper()
+                                    elif i + 1 < len(lines):
+                                        p_pdf_empresa = lines[i+1].upper()
 
-                            # Extraer Glosa / Descripción
-                            match_glosa = re.search(r'(?:Glosa|Descripción|Detalle|Trabajo)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,2})', texto_extraido, re.IGNORECASE)
-                            if match_glosa:
-                                p_pdf_glosa = match_glosa.group(1).strip()
+                                # Contacto
+                                if re.search(r'^(?:Contacto|Atenci[oó]n|Atte)\b', l, re.IGNORECASE):
+                                    val = l.split(":", 1)[-1].strip()
+                                    if len(val) > 2 and not re.search(r'^(?:Contacto|Atencion)', val, re.IGNORECASE):
+                                        p_pdf_contacto = val
+                                    elif i + 1 < len(lines):
+                                        p_pdf_contacto = lines[i+1]
 
-                            st.success("✅ Archivo PDF procesado exitosamente. Datos del documento leídos e ingresados.")
+                                # Ejecutivo
+                                if re.search(r'^(?:Ejecutivo|Atendida por|Vendedor|Emitido por)\b', l, re.IGNORECASE):
+                                    val = l.split(":", 1)[-1].strip()
+                                    if len(val) > 2 and not re.search(r'^(?:Ejecutivo|Vendedor)', val, re.IGNORECASE):
+                                        p_pdf_ejecutivo = val
+                                    elif i + 1 < len(lines):
+                                        p_pdf_ejecutivo = lines[i+1]
+
+                                # Planta
+                                if re.search(r'^(?:Planta|Sucursal|Direcci[oó]n)\b', l, re.IGNORECASE):
+                                    val = l.split(":", 1)[-1].strip()
+                                    if len(val) > 2:
+                                        p_pdf_planta = val.upper()
+
+                                # Glosa / Detalle
+                                if re.search(r'^(?:Glosa|Descripci[oó]n|Trabajo a realizar)\b', l, re.IGNORECASE):
+                                    val = l.split(":", 1)[-1].strip()
+                                    if len(val) > 5:
+                                        p_pdf_glosa = val
+                                    elif i + 1 < len(lines):
+                                        p_pdf_glosa = lines[i+1]
+
+                            # Fallbacks limpios
+                            if not p_pdf_glosa and len(lines) > 5:
+                                p_pdf_glosa = lines[0]
+
+                            st.success("✅ Archivo PDF procesado exitosamente. Todos los campos leídos se cargaron en el formulario.")
                         else:
                             st.warning("No se pudo extraer texto legible del PDF.")
                     except Exception as e:
