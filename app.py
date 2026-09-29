@@ -839,15 +839,20 @@ if check_password():
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
 
-        # --- LECTURA E IMPORTACIÓN DE COTIZACIÓN PDF ---
+        # --- LECTURA E IMPORTACIÓN DINÁMICA DE COTIZACIÓN PDF ---
         p_pdf_folio = f"137{len(df_cotizaciones)+7}"
-        p_pdf_empresa = "EDUCACION Y CAPACITACION VICTOR EDGARDO MORALES CIFRAS E.I.R.L"
-        p_pdf_rut = "76608422-2"
-        p_pdf_planta = "RANCAGUA"
-        p_pdf_contacto = "VICTOR EDGARDO MORALES CIFRAS"
-        p_pdf_neto = 32765
-        p_pdf_glosa = "Se ejecuta atención de llamado por falla en la visualización de las cámaras de seguridad en dispositivos móviles y computador de secretaria. Se restaura la visualización y se validad con los usuarios la solución del problema."
-        p_pdf_detalle = "Servicio de restauración y configuración de IVMS4200 en el Computador de Secretaria y restauración de visualización en dispositivos móviles"
+        p_pdf_empresa = ""
+        p_pdf_rut = ""
+        p_pdf_planta = ""
+        p_pdf_contacto = ""
+        p_pdf_email_cont = ""
+        p_pdf_fono_cont = ""
+        p_pdf_ejecutivo = ""
+        p_pdf_email_ejec = ""
+        p_pdf_fono_ejec = ""
+        p_pdf_neto = 0
+        p_pdf_glosa = ""
+        p_pdf_detalle = ""
 
         with st.expander("📄 Cargar e Importar Cotización desde Archivo PDF", expanded=False):
             st.write("Sube el PDF de una cotización emitida para extraer automáticamente su información.")
@@ -876,17 +881,17 @@ if check_password():
                         if texto_extraido:
                             import re
                             
-                            # Folio
+                            # Extraer Folio
                             match_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
                             if match_folio:
-                                p_pdf_folio = match_folio.group(1)
+                                p_pdf_folio = match_folio.group(1).strip()
 
-                            # RUT
+                            # Extraer RUT
                             match_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
                             if match_rut:
-                                p_pdf_rut = match_rut.group(1)
+                                p_pdf_rut = match_rut.group(1).strip()
 
-                            # Monto Neto
+                            # Extraer Monto Neto
                             match_neto = re.search(r'(?:Neto|Subtotal)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
                             if match_neto:
                                 try:
@@ -895,7 +900,37 @@ if check_password():
                                 except:
                                     pass
 
-                            st.success("✅ Archivo PDF procesado exitosamente. Datos precargados en el formulario de creación.")
+                            # Extraer Ejecutivo Comercial y sus datos de contacto dinámicamente
+                            match_ejec = re.search(r'(?:Ejecutivo|Atendida por|Vendedor|Emitido por)\s*[:#]?\s*([A-Za-zÁÉÍÓÚáéíóúÑñ\s]{3,40})', texto_extraido, re.IGNORECASE)
+                            if match_ejec:
+                                p_pdf_ejecutivo = match_ejec.group(1).strip()
+
+                            # Extraer Emails del documento
+                            emails_found = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
+                            for em in emails_found:
+                                if "itelcam" in em.lower():
+                                    p_pdf_email_ejec = em
+                                else:
+                                    p_pdf_email_cont = em
+
+                            # Extraer Teléfonos
+                            fonos_found = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
+                            if len(fonos_found) >= 1:
+                                p_pdf_fono_ejec = fonos_found[0].replace(" ", "")
+                            if len(fonos_found) >= 2:
+                                p_pdf_fono_cont = fonos_found[1].replace(" ", "")
+
+                            # Extraer Nombre Cliente / Empresa
+                            match_emp = re.search(r'(?:Empresa|Cliente|Señor(?:es)?)\s*[:#]?\s*([A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\.\&\-]{3,60})', texto_extraido, re.IGNORECASE)
+                            if match_emp:
+                                p_pdf_empresa = match_emp.group(1).strip().upper()
+
+                            # Extraer Glosa / Descripción
+                            match_glosa = re.search(r'(?:Glosa|Descripción|Detalle|Trabajo)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,2})', texto_extraido, re.IGNORECASE)
+                            if match_glosa:
+                                p_pdf_glosa = match_glosa.group(1).strip()
+
+                            st.success("✅ Archivo PDF procesado exitosamente. Datos del documento leídos e ingresados.")
                         else:
                             st.warning("No se pudo extraer texto legible del PDF.")
                     except Exception as e:
@@ -914,18 +949,18 @@ if check_password():
                 
                 with c_head2:
                     cot_contacto = st.text_input("Nombre Contacto Cliente", value=p_pdf_contacto)
-                    cot_email_cont = st.text_input("Email Contacto", value="")
-                    cot_fono_cont = st.text_input("Fono Contacto", value="982065425")
+                    cot_email_cont = st.text_input("Email Contacto", value=p_pdf_email_cont)
+                    cot_fono_cont = st.text_input("Fono Contacto", value=p_pdf_fono_cont)
                     cot_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"])
 
                 with c_head3:
-                    cot_ejecutivo = st.text_input("Ejecutivo Comercial", value="Edgar Jesús Cabrera")
-                    cot_email_ejec = st.text_input("Email Ejecutivo", value="edgar.cabrera@itelcam.cl")
-                    cot_fono_ejec = st.text_input("Fono Ejecutivo", value="982065425")
+                    cot_ejecutivo = st.text_input("Ejecutivo Comercial", value=p_pdf_ejecutivo)
+                    cot_email_ejec = st.text_input("Email Ejecutivo", value=p_pdf_email_ejec)
+                    cot_fono_ejec = st.text_input("Fono Ejecutivo", value=p_pdf_fono_ejec)
                     
                     c_f1, c_f2 = st.columns(2)
-                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=date(2026, 8, 28))
-                    cot_f_val = c_f2.date_input("Válido Hasta", value=date(2026, 9, 12))
+                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=date.today())
+                    cot_f_val = c_f2.date_input("Válido Hasta", value=date.today() + timedelta(days=15))
 
                 st.divider()
                 st.subheader("2. Glosa Descriptiva del Servicio")
@@ -1229,7 +1264,7 @@ if check_password():
             p_grupo_serv = "SERVICIO GENERAL"
             p_detalle = xml_detalle if xml_detalle else ""
             p_monto = xml_monto_neto if xml_monto_neto > 0 else 0
-            p_fecha_cot = date(2026, 8, 28)
+            p_fecha_cot = date.today()
             p_fecha_emi = xml_fecha_emi
             p_fecha_venc = xml_fecha_venc
             
@@ -1243,7 +1278,7 @@ if check_password():
                 try:
                     p_fecha_cot = pd.to_datetime(row_c.get("Fecha_Emision")).date()
                 except:
-                    p_fecha_cot = date(2026, 8, 28)
+                    p_fecha_cot = date.today()
                 st.info(f"💡 Datos cargados automáticamente desde Cotización Folio **#{cot_sel}** (Fecha de Emisión: {p_fecha_cot})")
 
             with st.form("form_nueva_factura", clear_on_submit=True):
