@@ -659,7 +659,7 @@ if check_password():
                 clientes_en_riesgo = df_churn_comparativa[df_churn_comparativa['Variacion_%'] <= -30.0]
                
                 if not clientes_en_riesgo.empty:
-                    st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
+                    st.error(f"⚠️️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
                     df_churn_display['Variacion_%'] = df_churn_display['Variacion_%'].map(lambda x: f"{x:.1f}%")
                     df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
@@ -883,17 +883,17 @@ if check_password():
                             
                             lines = [line.strip() for line in texto_extraido.split("\n") if line.strip()]
 
-                            # 1. Extraer Folio
+                            # 1. Folio
                             m_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
                             if m_folio:
                                 p_pdf_folio = m_folio.group(1).strip()
 
-                            # 2. Extraer RUT
+                            # 2. RUT
                             m_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
                             if m_rut:
                                 p_pdf_rut = m_rut.group(1).strip()
 
-                            # 3. Extraer Monto Neto
+                            # 3. Monto Neto
                             m_neto = re.search(r'(?:Neto|Subtotal|Sub-Total)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
                             if m_neto:
                                 try:
@@ -902,7 +902,7 @@ if check_password():
                                 except:
                                     pass
 
-                            # 4. Extraer Emails
+                            # 4. Emails
                             emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
                             for em in emails:
                                 if "itelcam" in em.lower():
@@ -910,58 +910,59 @@ if check_password():
                                 elif not p_pdf_email_cont:
                                     p_pdf_email_cont = em
 
-                            # 5. Extraer Teléfonos
+                            # 5. Teléfonos
                             fonos = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
                             if len(fonos) >= 1:
                                 p_pdf_fono_ejec = fonos[0].replace(" ", "")
                             if len(fonos) >= 2:
                                 p_pdf_fono_cont = fonos[1].replace(" ", "")
 
-                            # 6. Escaneo por Líneas para Campos Complejos (Empresa, Contacto, Ejecutivo, Glosa)
-                            for i, l in enumerate(lines):
-                                # Empresa / Cliente
-                                if re.search(r'^(?:Señor|Señores|Cliente|Empresa|Razon Social)\b', l, re.IGNORECASE):
-                                    val = l.split(":", 1)[-1].strip()
-                                    if len(val) > 3 and not re.search(r'^(?:Señor|Cliente|Empresa)', val, re.IGNORECASE):
-                                        p_pdf_empresa = val.upper()
-                                    elif i + 1 < len(lines):
-                                        p_pdf_empresa = lines[i+1].upper()
+                            # 6. Escaneo por Expresiones Avanzadas Multilínea (Empresa, Contacto, Ejecutivo, Planta)
+                            m_emp = re.search(r'(?:Señores|Señor(?:es)?|Empresa|Raz[oó]n Social|Cliente)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
+                            if m_emp:
+                                val_e = m_emp.group(1).strip()
+                                # Si la captura contiene palabras clave de la etiqueta posterior, limpiarla
+                                val_e = re.split(r'\b(?:RUT|Planta|Sucursal|Atenci[oó]n|Fecha)\b', val_e, flags=re.IGNORECASE)[0].strip()
+                                if len(val_e) > 2:
+                                    p_pdf_empresa = val_e.upper()
 
-                                # Contacto
-                                if re.search(r'^(?:Contacto|Atenci[oó]n|Atte)\b', l, re.IGNORECASE):
-                                    val = l.split(":", 1)[-1].strip()
-                                    if len(val) > 2 and not re.search(r'^(?:Contacto|Atencion)', val, re.IGNORECASE):
-                                        p_pdf_contacto = val
-                                    elif i + 1 < len(lines):
-                                        p_pdf_contacto = lines[i+1]
+                            m_cont = re.search(r'(?:Contacto|Atenci[oó]n|Atte|Estimado)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
+                            if m_cont:
+                                val_c = m_cont.group(1).strip()
+                                val_c = re.split(r'\b(?:Email|Correo|Fono|Tel[eé]fono|RUT)\b', val_c, flags=re.IGNORECASE)[0].strip()
+                                if len(val_c) > 2:
+                                    p_pdf_contacto = val_c
 
-                                # Ejecutivo
-                                if re.search(r'^(?:Ejecutivo|Atendida por|Vendedor|Emitido por)\b', l, re.IGNORECASE):
-                                    val = l.split(":", 1)[-1].strip()
-                                    if len(val) > 2 and not re.search(r'^(?:Ejecutivo|Vendedor)', val, re.IGNORECASE):
-                                        p_pdf_ejecutivo = val
-                                    elif i + 1 < len(lines):
-                                        p_pdf_ejecutivo = lines[i+1]
+                            m_ejec = re.search(r'(?:Ejecutivo|Atendida por|Vendedor|Emitido por)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
+                            if m_ejec:
+                                val_ej = m_ejec.group(1).strip()
+                                val_ej = re.split(r'\b(?:Email|Correo|Fono|Tel[eé]fono)\b', val_ej, flags=re.IGNORECASE)[0].strip()
+                                if len(val_ej) > 2:
+                                    p_pdf_ejecutivo = val_ej
 
-                                # Planta
-                                if re.search(r'^(?:Planta|Sucursal|Direcci[oó]n)\b', l, re.IGNORECASE):
-                                    val = l.split(":", 1)[-1].strip()
-                                    if len(val) > 2:
-                                        p_pdf_planta = val.upper()
+                            m_planta = re.search(r'(?:Planta|Sucursal|Direcci[oó]n)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
+                            if m_planta:
+                                val_p = m_planta.group(1).strip()
+                                val_p = re.split(r'\b(?:RUT|Contacto|Fecha)\b', val_p, flags=re.IGNORECASE)[0].strip()
+                                if len(val_p) > 2:
+                                    p_pdf_planta = val_p.upper()
 
-                                # Glosa / Detalle
-                                if re.search(r'^(?:Glosa|Descripci[oó]n|Trabajo a realizar)\b', l, re.IGNORECASE):
-                                    val = l.split(":", 1)[-1].strip()
-                                    if len(val) > 5:
-                                        p_pdf_glosa = val
-                                    elif i + 1 < len(lines):
-                                        p_pdf_glosa = lines[i+1]
+                            # 7. Deducción inteligente de Empresa por Correo si la etiqueta no venía clara
+                            if not p_pdf_empresa and p_pdf_email_cont:
+                                dom = p_pdf_email_cont.split("@")[-1].lower()
+                                if "arcor" in dom or "dosenuno" in dom:
+                                    p_pdf_empresa = "ARCOR / DOS EN UNO"
+                                elif "agrosuper" in dom:
+                                    p_pdf_empresa = "AGROSUPER"
+                                elif "cmpc" in dom:
+                                    p_pdf_empresa = "CMPC"
 
-                            # Fallbacks limpios
-                            if not p_pdf_glosa and len(lines) > 5:
-                                p_pdf_glosa = lines[0]
+                            # 8. Extraer Glosa Completa
+                            m_glosa = re.search(r'(?:Glosa|Descripci[oó]n|Trabajo a realizar)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,3})', texto_extraido, re.IGNORECASE)
+                            if m_glosa:
+                                p_pdf_glosa = m_glosa.group(1).strip()
 
-                            st.success("✅ Archivo PDF procesado exitosamente. Todos los campos leídos se cargaron en el formulario.")
+                            st.success("✅ Archivo PDF procesado exitosamente. Todos los datos fueron leídos e ingresados.")
                         else:
                             st.warning("No se pudo extraer texto legible del PDF.")
                     except Exception as e:
