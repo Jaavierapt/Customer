@@ -654,7 +654,7 @@ if check_password():
                 clientes_en_riesgo = df_churn_comparativa[df_churn_comparativa['Variacion_%'] <= -30.0]
                
                 if not clientes_en_riesgo.empty:
-                    st.error(f"⚠️️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
+                    st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
                     df_churn_display['Variacion_%'] = df_churn_display['Variacion_%'].map(lambda x: f"{x:.1f}%")
                     df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
@@ -897,7 +897,6 @@ if check_password():
                                 p_pdf_rut = m_rut.group(1).strip()
 
                             # 3. Extraer Fechas Dinámicamente desde el PDF
-                            # Fecha de Emisión
                             m_f_emi = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n|Fecha)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_emi:
                                 try:
@@ -906,7 +905,6 @@ if check_password():
                                 except:
                                     pass
 
-                            # Fecha Válido Hasta / Validez
                             m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_val:
                                 try:
@@ -1221,19 +1219,112 @@ if check_password():
     with tab4:
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
+        # Variables temporales para auto-completar desde PDF o XML
+        doc_factura = ""
+        doc_empresa = ""
+        doc_monto_neto = 0
+        doc_moneda = "CLP"
+        doc_fecha_emi = None
+        doc_fecha_venc = None
+        doc_detalle = ""
+
+        # =====================================================================
+        # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS PDF FACTURA
+        # =====================================================================
+        with st.expander("📄 Cargar e Importar Factura desde Archivo PDF", expanded=False):
+            st.write("Sube el PDF de una factura recibida o emitida para extraer automáticamente sus datos. *(No almacena el archivo)*")
+            archivo_pdf_fact = st.file_uploader("Seleccionar archivo PDF Factura", type=["pdf"], key="uploader_pdf_factura")
+            
+            if archivo_pdf_fact is not None:
+                if not PDF_READER_AVAILABLE:
+                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pypdf` a tu archivo `requirements.txt` de GitHub.")
+                else:
+                    try:
+                        texto_fact_pdf = ""
+                        pdf_stream_f = io.BytesIO(archivo_pdf_fact.read())
+                        
+                        if PDF_READER_TYPE in ["pypdf", "pypdf2"]:
+                            reader_f = pypdf.PdfReader(pdf_stream_f)
+                            for page in reader_f.pages:
+                                txt_p = page.extract_text()
+                                if txt_p:
+                                    texto_fact_pdf += txt_p + "\n"
+                        elif PDF_READER_TYPE == "pdfplumber":
+                            with pdfplumber.open(pdf_stream_f) as pdf_doc_f:
+                                for page in pdf_doc_f.pages:
+                                    txt_p = page.extract_text()
+                                    if txt_p:
+                                        texto_fact_pdf += txt_p + "\n"
+
+                        if texto_fact_pdf:
+                            import re
+                            
+                            # Moneda
+                            if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_fact_pdf, re.IGNORECASE):
+                                doc_moneda = "USD"
+                            else:
+                                doc_moneda = "CLP"
+
+                            # N° Factura
+                            m_fact = re.search(r'(?:Factura|N[°º]|Folio|DTE)\s*[:#]?\s*(\d+)', texto_fact_pdf, re.IGNORECASE)
+                            if m_fact:
+                                doc_factura = m_fact.group(1).strip()
+
+                            # Empresa / Razon Social
+                            m_emp_f = re.search(r'(?:Señor(?:es)?|Empresa|Raz[oó]n Social|Cliente|Receptor)\s*[:#]?\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                            if m_emp_f:
+                                val_ef = m_emp_f.group(1).strip()
+                                val_ef = re.split(r'\b(?:RUT|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
+                                if len(val_ef) > 2:
+                                    doc_empresa = val_ef.upper()
+
+                            # Fecha Emision
+                            m_f_emi_f = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n|Fecha)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
+                            if m_f_emi_f:
+                                try:
+                                    str_ff = m_f_emi_f.group(1).replace('/', '-').replace('.', '-')
+                                    doc_fecha_emi = pd.to_datetime(str_ff, dayfirst=True if len(str_ff.split('-')[0]) <= 2 else False).date()
+                                except:
+                                    doc_fecha_emi = date.today()
+
+                            # Fecha Vencimiento
+                            m_f_venc_f = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
+                            if m_f_venc_f:
+                                try:
+                                    str_fvf = m_f_venc_f.group(1).replace('/', '-').replace('.', '-')
+                                    doc_fecha_venc = pd.to_datetime(str_fvf, dayfirst=True if len(str_fvf.split('-')[0]) <= 2 else False).date()
+                                except:
+                                    if doc_fecha_emi:
+                                        doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
+                            elif doc_fecha_emi:
+                                doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
+
+                            # Monto Neto
+                            m_neto_f = re.search(r'(?:Neto|Monto\s*Neto|Subtotal)\s*[:$]?\s*([\d\.\,]+)', texto_fact_pdf, re.IGNORECASE)
+                            if m_neto_f:
+                                try:
+                                    limp_f = m_neto_f.group(1).replace('.', '').replace(',', '.')
+                                    doc_monto_neto = int(round(float(limp_f)))
+                                except:
+                                    pass
+
+                            # Detalle / Glosa
+                            m_det_f = re.search(r'(?:Detalle|Glosa|Descripci[oó]n|Concepto)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,2})', texto_fact_pdf, re.IGNORECASE)
+                            if m_det_f:
+                                doc_detalle = m_det_f.group(1).strip().upper()
+
+                            st.success(f"✅ Factura PDF N° {doc_factura} ({doc_empresa}) leída correctamente. Datos extraídos sin almacenar el archivo.")
+                        else:
+                            st.warning("No se pudo extraer texto legible del PDF de la factura.")
+                    except Exception as e:
+                        st.error(f"Error al leer el archivo PDF de la factura: {e}")
+
         # =====================================================================
         # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS XML
         # =====================================================================
         with st.expander("📄 Cargar Importar Factura desde Archivo XML (DTE)", expanded=False):
             st.write("Sube el archivo XML del Documento Tributario Electrónico (DTE) emitido o recibido para registrar la factura. *(No almacena el archivo en servidor/nube)*")
             archivo_xml = st.file_uploader("Seleccionar archivo XML DTE", type=["xml"], key="uploader_xml_factura")
-            
-            xml_folio = ""
-            xml_empresa = ""
-            xml_monto_neto = 0
-            xml_fecha_emi = None
-            xml_fecha_venc = None
-            xml_detalle = ""
 
             if archivo_xml is not None:
                 try:
@@ -1246,37 +1337,38 @@ if check_password():
                             elem.tag = elem.tag.split('}', 1)[1]
                     
                     folio_elem = root.find(".//Folio")
-                    xml_folio = folio_elem.text.strip() if folio_elem is not None and folio_elem.text else ""
+                    if folio_elem is not None and folio_elem.text:
+                        doc_factura = folio_elem.text.strip()
                     
                     recep_elem = root.find(".//RznSocRecep")
                     emisor_elem = root.find(".//RznSoc")
                     if recep_elem is not None and recep_elem.text:
-                        xml_empresa = recep_elem.text.strip().upper()
+                        doc_empresa = recep_elem.text.strip().upper()
                     elif emisor_elem is not None and emisor_elem.text:
-                        xml_empresa = emisor_elem.text.strip().upper()
+                        doc_empresa = emisor_elem.text.strip().upper()
                         
                     neto_elem = root.find(".//MntNeto")
                     if neto_elem is not None and neto_elem.text:
                         try:
-                            xml_monto_neto = int(round(float(neto_elem.text.strip())))
+                            doc_monto_neto = int(round(float(neto_elem.text.strip())))
                         except:
-                            xml_monto_neto = 0
+                            pass
 
                     fch_elem = root.find(".//FchEmis")
                     if fch_elem is not None and fch_elem.text:
                         try:
-                            xml_fecha_emi = pd.to_datetime(fch_elem.text.strip()).date()
+                            doc_fecha_emi = pd.to_datetime(fch_elem.text.strip()).date()
                         except:
-                            xml_fecha_emi = None
+                            pass
 
                     fch_venc_elem = root.find(".//FchVenc")
                     if fch_venc_elem is not None and fch_venc_elem.text:
                         try:
-                            xml_fecha_venc = pd.to_datetime(fch_venc_elem.text.strip()).date()
+                            doc_fecha_venc = pd.to_datetime(fch_venc_elem.text.strip()).date()
                         except:
-                            xml_fecha_venc = None
-                    elif xml_fecha_emi:
-                        xml_fecha_venc = xml_fecha_emi + timedelta(days=30)
+                            pass
+                    elif doc_fecha_emi:
+                        doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
 
                     detalles_items = []
                     for item in root.findall(".//DchItem"):
@@ -1296,32 +1388,32 @@ if check_password():
                                 detalles_items.append(nmb.text.strip())
 
                     if detalles_items:
-                        xml_detalle = " / ".join(detalles_items).upper()
+                        doc_detalle = " / ".join(detalles_items).upper()
 
-                    st.success(f"✅ Factura N° {xml_folio} ({xml_empresa}) leída correctamente. Monto Neto: ${xml_monto_neto:,.0f}".replace(",", "."))
+                    st.success(f"✅ Factura XML N° {doc_factura} ({doc_empresa}) leída correctamente. Monto Neto: ${doc_monto_neto:,.0f}".replace(",", "."))
                 except Exception as e:
                     st.error(f"Error al procesar el archivo XML: {e}")
 
         st.divider()
 
         # =====================================================================
-        # CREACIÓN DE FACTURA (VINCULADA COMPLETAMENTE A COTIZACIONES EXISTENTES O XML)
+        # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES, PDF O XML)
         # =====================================================================
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
             st.markdown("### 🔗 Enlazar desde Cotización Existente (Opcional)")
             cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
             cot_sel = st.selectbox("Seleccionar Cotización para importar datos:", ["--- Sin Enlace ---"] + cotizaciones_list, key="select_cot_to_fact")
             
-            p_factura = xml_folio
-            p_empresa = xml_empresa if xml_empresa else ""
+            p_factura = doc_factura
+            p_empresa = doc_empresa if doc_empresa else ""
             p_planta = ""
             p_grupo_serv = "SERVICIO GENERAL"
-            p_detalle = xml_detalle if xml_detalle else ""
-            p_monto = xml_monto_neto if xml_monto_neto > 0 else 0
-            p_moneda = "CLP"
+            p_detalle = doc_detalle if doc_detalle else ""
+            p_monto = doc_monto_neto if doc_monto_neto > 0 else 0
+            p_moneda = doc_moneda
             p_fecha_cot = date.today()
-            p_fecha_emi = xml_fecha_emi
-            p_fecha_venc = xml_fecha_venc
+            p_fecha_emi = doc_fecha_emi
+            p_fecha_venc = doc_fecha_venc
             
             if cot_sel != "--- Sin Enlace ---":
                 row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
@@ -1332,7 +1424,6 @@ if check_password():
                 p_monto = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
                 p_moneda = str(row_c.get("Moneda", "CLP")).upper()
                 
-                # Traspaso exacto de fechas sin forzar fallbacks rígidos
                 raw_f_cot = row_c.get("Fecha_Emision")
                 if pd.notna(raw_f_cot) and str(raw_f_cot).strip() not in ["", "None", "NaT"]:
                     try:
@@ -1965,7 +2056,7 @@ if check_password():
             df_contactos[['Lead_Score', 'Temperatura_Lead']] = df_contactos.apply(calcular_lead_scoring, axis=1)
         else:
             df_contactos['Lead_Score'] = 0
-            df_contactos['Temperatura_Lead'] = "❄️ Lead Frío"
+            df_contactos['Temperatura_Lead'] = "❄️️ Lead Frío"
 
         col_sc1, col_sc2 = st.columns(2)
         with col_sc1:
