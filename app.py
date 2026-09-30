@@ -190,19 +190,9 @@ def cargar_cotizaciones():
 
     if 'Fecha_Emision' in df_c.columns:
         df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28', '': '2026-08-28'})
         
     if 'Fecha_Validez' in df_c.columns:
         df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].replace({
-            '2026-09-28': '2026-09-12', 
-            '2026-10-13': '2026-09-12', 
-            'None': '2026-09-12', 
-            'nan': '2026-09-12', 
-            '': '2026-09-12'
-        })
-        if 'Folio' in df_c.columns:
-            df_c.loc[df_c['Folio'].astype(str) == '1377', 'Fecha_Validez'] = '2026-09-12'
 
     return df_c
 
@@ -304,7 +294,6 @@ def check_password():
 # =============================================================================
 def generar_pdf(df_original):
     def safe_txt(txt):
-        """Limpia el texto para evitar errores de codificación Unicode en FPDF (Latin-1)."""
         if txt is None:
             return ""
         return str(txt).encode('latin-1', 'replace').decode('latin-1')
@@ -665,7 +654,7 @@ if check_password():
                 clientes_en_riesgo = df_churn_comparativa[df_churn_comparativa['Variacion_%'] <= -30.0]
                
                 if not clientes_en_riesgo.empty:
-                    st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
+                    st.error(f"⚠️️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
                     df_churn_display['Variacion_%'] = df_churn_display['Variacion_%'].map(lambda x: f"{x:.1f}%")
                     df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
@@ -845,7 +834,7 @@ if check_password():
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
 
-        # --- LECTURA E IMPORTACIÓN DINÁMICA DE COTIZACIÓN PDF (PROCESAMIENTO EXCLUSIVO EN MEMORIA RAM) ---
+        # --- LECTURA E IMPORTACIÓN DINÁMICA DE COTIZACIÓN PDF ---
         p_pdf_folio = f"137{len(df_cotizaciones)+7}"
         p_pdf_empresa = ""
         p_pdf_rut = ""
@@ -860,6 +849,8 @@ if check_password():
         p_pdf_moneda = "CLP"
         p_pdf_glosa = ""
         p_pdf_detalle = ""
+        p_pdf_fecha_emi = date.today()
+        p_pdf_fecha_val = date.today() + timedelta(days=15)
 
         with st.expander("📄 Cargar e Importar Cotización desde Archivo PDF", expanded=False):
             st.write("Sube el PDF de una cotización emitida para extraer automáticamente su información. *(No almacena archivos)*")
@@ -871,7 +862,6 @@ if check_password():
                 else:
                     try:
                         texto_extraido = ""
-                        # Procesamiento directo en memoria desde el buffer de bytes
                         pdf_stream = io.BytesIO(archivo_pdf_cot.read())
                         
                         if PDF_READER_TYPE in ["pypdf", "pypdf2"]:
@@ -890,7 +880,7 @@ if check_password():
                         if texto_extraido:
                             import re
                             
-                            # Detección explícita de moneda en el texto del PDF
+                            # Moneda
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_extraido, re.IGNORECASE):
                                 p_pdf_moneda = "USD"
                             else:
@@ -906,7 +896,28 @@ if check_password():
                             if m_rut:
                                 p_pdf_rut = m_rut.group(1).strip()
 
-                            # 3. Monto Neto
+                            # 3. Extraer Fechas Dinámicamente desde el PDF
+                            # Fecha de Emisión
+                            m_f_emi = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n|Fecha)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
+                            if m_f_emi:
+                                try:
+                                    str_f = m_f_emi.group(1).replace('/', '-').replace('.', '-')
+                                    p_pdf_fecha_emi = pd.to_datetime(str_f, dayfirst=True if len(str_f.split('-')[0]) <= 2 else False).date()
+                                except:
+                                    pass
+
+                            # Fecha Válido Hasta / Validez
+                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
+                            if m_f_val:
+                                try:
+                                    str_fv = m_f_val.group(1).replace('/', '-').replace('.', '-')
+                                    p_pdf_fecha_val = pd.to_datetime(str_fv, dayfirst=True if len(str_fv.split('-')[0]) <= 2 else False).date()
+                                except:
+                                    p_pdf_fecha_val = p_pdf_fecha_emi + timedelta(days=15)
+                            else:
+                                p_pdf_fecha_val = p_pdf_fecha_emi + timedelta(days=15)
+
+                            # 4. Monto Neto
                             m_neto = re.search(r'(?:Neto|Subtotal|Sub-Total)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
                             if m_neto:
                                 try:
@@ -915,7 +926,7 @@ if check_password():
                                 except:
                                     pass
 
-                            # 4. Emails
+                            # 5. Emails
                             emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
                             for em in emails:
                                 if "itelcam" in em.lower():
@@ -923,14 +934,14 @@ if check_password():
                                 elif not p_pdf_email_cont:
                                     p_pdf_email_cont = em
 
-                            # 5. Teléfonos
+                            # 6. Teléfonos
                             fonos = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
                             if len(fonos) >= 1:
                                 p_pdf_fono_ejec = fonos[0].replace(" ", "")
                             if len(fonos) >= 2:
                                 p_pdf_fono_cont = fonos[1].replace(" ", "")
 
-                            # 6. Escaneo por Expresiones Avanzadas Multilínea (Empresa, Contacto, Ejecutivo, Planta)
+                            # 7. Escaneo por Expresiones Avanzadas Multilínea (Empresa, Contacto, Ejecutivo, Planta)
                             m_emp = re.search(r'(?:Señores|Señor(?:es)?|Empresa|Raz[oó]n Social|Cliente)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
                             if m_emp:
                                 val_e = m_emp.group(1).strip()
@@ -959,7 +970,7 @@ if check_password():
                                 if len(val_p) > 2:
                                     p_pdf_planta = val_p.upper()
 
-                            # 7. Deducción inteligente de Empresa por Correo
+                            # 8. Deducción inteligente de Empresa por Correo
                             if not p_pdf_empresa and p_pdf_email_cont:
                                 dom = p_pdf_email_cont.split("@")[-1].lower()
                                 if "arcor" in dom or "dosenuno" in dom:
@@ -969,12 +980,12 @@ if check_password():
                                 elif "cmpc" in dom:
                                     p_pdf_empresa = "CMPC"
 
-                            # 8. Extraer Glosa Completa
+                            # 9. Extraer Glosa Completa
                             m_glosa = re.search(r'(?:Glosa|Descripci[oó]n|Trabajo a realizar)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,3})', texto_extraido, re.IGNORECASE)
                             if m_glosa:
                                 p_pdf_glosa = m_glosa.group(1).strip()
 
-                            st.success("✅ Archivo PDF procesado exitosamente. Datos extraídos sin almacenar el documento.")
+                            st.success("✅ Archivo PDF procesado exitosamente. Fechas y datos extraídos correctamente.")
                         else:
                             st.warning("No se pudo extraer texto legible del PDF.")
                     except Exception as e:
@@ -1003,8 +1014,8 @@ if check_password():
                     cot_fono_ejec = st.text_input("Fono Ejecutivo", value=p_pdf_fono_ejec)
                     
                     c_f1, c_f2 = st.columns(2)
-                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=date.today())
-                    cot_f_val = c_f2.date_input("Válido Hasta", value=date.today() + timedelta(days=15))
+                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=p_pdf_fecha_emi)
+                    cot_f_val = c_f2.date_input("Válido Hasta", value=p_pdf_fecha_val)
 
                 st.divider()
                 st.subheader("2. Glosa Descriptiva del Servicio")
@@ -1023,7 +1034,6 @@ if check_password():
                 cot_detalle = det_col3.text_input("Detalle del Servicio", value=p_pdf_detalle)
                 cot_neto = det_col4.number_input("Valor Neto", min_value=0, step=100 if cot_moneda == "USD" else 1000, value=p_pdf_neto)
 
-                # Totales
                 calc_iva = int(round(cot_neto * 0.19))
                 calc_total = cot_neto + calc_iva
                 simbolo_m = "$" if cot_moneda == "CLP" else "US$"
@@ -1068,7 +1078,7 @@ if check_password():
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
 
         # =====================================================================
-        # APARTADO EDITAR COTIZACIÓN EXISTENTE (DISPONIBLE PARA TODOS)
+        # APARTADO EDITAR COTIZACIÓN EXISTENTE
         # =====================================================================
         with st.expander("✏️ Editar Cotización Existente"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
@@ -1078,21 +1088,13 @@ if check_password():
                 if folio_cot_editar:
                     row_c_edit = df_cotizaciones[df_cotizaciones['Folio'].astype(str) == str(folio_cot_editar)].iloc[0]
                     
-                    def safe_date_cot(val, default_val=date(2026, 8, 28)):
-                        if pd.notna(val) and str(val).strip() not in ["", "None", "NaT", "nan", "2026-09-28"]:
+                    def parse_date_dynamic(val, fallback):
+                        if pd.notna(val) and str(val).strip() not in ["", "None", "NaT", "nan"]:
                             try:
                                 return pd.to_datetime(val).date()
                             except:
-                                return default_val
-                        return default_val
-
-                    def safe_validez_cot(val, default_val=date(2026, 9, 12)):
-                        if pd.notna(val) and str(val).strip() not in ["", "None", "NaT", "nan", "2026-09-28", "2026-10-13"]:
-                            try:
-                                return pd.to_datetime(val).date()
-                            except:
-                                return default_val
-                        return default_val
+                                return fallback
+                        return fallback
 
                     with st.form(f"form_edit_cot_{folio_cot_editar}"):
                         st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
@@ -1116,8 +1118,8 @@ if check_password():
                             ec_ejecutivo = st.text_input("Ejecutivo", value=str(row_c_edit.get('Ejecutivo', '')))
                             ec_email_ejec = st.text_input("Email Ejecutivo", value=str(row_c_edit.get('Email_Ejecutivo', '')))
                             ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
-                            ec_f_emi = st.date_input("Fecha Emisión", value=safe_date_cot(row_c_edit.get('Fecha_Emision'), date(2026, 8, 28)))
-                            ec_f_val = st.date_input("Válido Hasta", value=safe_validez_cot(row_c_edit.get('Fecha_Validez'), date(2026, 9, 12)))
+                            ec_f_emi = st.date_input("Fecha Emisión", value=parse_date_dynamic(row_c_edit.get('Fecha_Emision'), date.today()))
+                            ec_f_val = st.date_input("Válido Hasta", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), date.today() + timedelta(days=15)))
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
                         
@@ -1155,8 +1157,8 @@ if check_password():
                                 "Fono_Ejecutivo": ec_fono_ejec.strip(),
                                 "Condicion_Pago": ec_condicion,
                                 "Moneda": ec_moneda,
-                                "Fecha_Emision": str(ec_f_emi) if ec_f_emi else "2026-08-28",
-                                "Fecha_Validez": str(ec_f_val) if ec_f_val else "2026-09-12",
+                                "Fecha_Emision": str(ec_f_emi),
+                                "Fecha_Validez": str(ec_f_val),
                                 "Glosa": ec_glosa.strip(),
                                 "Grupo_Servicio": ec_grupo_serv.upper(),
                                 "Detalle_Servicio": ec_detalle.strip().upper(),
@@ -1202,7 +1204,6 @@ if check_password():
             if 'Moneda' not in df_cot_disp.columns:
                 df_cot_disp['Moneda'] = 'CLP'
             df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-            df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].replace({'2026-09-28': '2026-08-28', 'None': '2026-08-28', 'nan': '2026-08-28'})
                 
             st.dataframe(
                 df_cot_disp[["Folio", "Empresa", "Planta", "Fecha_Emision", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
@@ -1221,7 +1222,7 @@ if check_password():
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
         # =====================================================================
-        # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS XML (PROCESAMIENTO EXCLUSIVO EN MEMORIA RAM)
+        # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS XML
         # =====================================================================
         with st.expander("📄 Cargar Importar Factura desde Archivo XML (DTE)", expanded=False):
             st.write("Sube el archivo XML del Documento Tributario Electrónico (DTE) emitido o recibido para registrar la factura. *(No almacena el archivo en servidor/nube)*")
@@ -1236,7 +1237,6 @@ if check_password():
 
             if archivo_xml is not None:
                 try:
-                    # Lectura directa desde memoria RAM
                     xml_stream = io.BytesIO(archivo_xml.read())
                     tree = ET.parse(xml_stream)
                     root = tree.getroot()
@@ -1331,11 +1331,23 @@ if check_password():
                 p_detalle = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", "")))
                 p_monto = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
                 p_moneda = str(row_c.get("Moneda", "CLP")).upper()
-                try:
-                    p_fecha_cot = pd.to_datetime(row_c.get("Fecha_Emision")).date()
-                except:
-                    p_fecha_cot = date.today()
-                st.info(f"💡 Todos los datos e información fueron vinculados desde Cotización Folio **#{cot_sel}** (Moneda: {p_moneda}, Cliente: {p_empresa})")
+                
+                # Traspaso exacto de fechas sin forzar fallbacks rígidos
+                raw_f_cot = row_c.get("Fecha_Emision")
+                if pd.notna(raw_f_cot) and str(raw_f_cot).strip() not in ["", "None", "NaT"]:
+                    try:
+                        p_fecha_cot = pd.to_datetime(raw_f_cot).date()
+                    except:
+                        p_fecha_cot = date.today()
+                
+                raw_f_val = row_c.get("Fecha_Validez")
+                if pd.notna(raw_f_val) and str(raw_f_val).strip() not in ["", "None", "NaT"]:
+                    try:
+                        p_fecha_venc = pd.to_datetime(raw_f_val).date()
+                    except:
+                        p_fecha_venc = p_fecha_cot + timedelta(days=30)
+                        
+                st.info(f"💡 Todos los datos e información fueron vinculados desde Cotización Folio **#{cot_sel}** (Fecha Cotización: {p_fecha_cot}, Vencimiento: {p_fecha_venc})")
 
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
@@ -1418,7 +1430,7 @@ if check_password():
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
         # =====================================================================
-        # APARTADO PARA EDITAR FACTURAS EXISTENTES (DISPONIBLE PARA TODOS)
+        # APARTADO PARA EDITAR FACTURAS EXISTENTES
         # =====================================================================
         with st.expander("✏️ Editar Factura Existente (Todas las Secciones)"):
             if not df.empty and 'Factura' in df.columns:
@@ -1674,7 +1686,7 @@ if check_password():
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
        
         # =====================================================================
-        # PANEL DE NUEVOS KPIS COMERCIALES
+        # PANEL DE KPIS COMERCIALES
         # =====================================================================
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
           
@@ -1809,7 +1821,7 @@ if check_password():
                         st.markdown(
                             f"""
                             <a href="{mailto_link}" target="_blank" style="display:inline-block; padding:6px 12px; margin:4px 0px; font-size:12px; color:white; background-color:#2563eb; text-align:center; text-decoration:none; border-radius:4px; font-weight:600;">
-                                ✉️️ Enviar Correo
+                                ✉ Enviar Correo
                             </a>
                             """,
                             unsafe_allow_html=True
