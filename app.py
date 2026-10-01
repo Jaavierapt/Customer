@@ -1222,6 +1222,7 @@ if check_password():
         # Variables temporales para auto-completar desde PDF o XML
         doc_factura = ""
         doc_empresa = ""
+        doc_planta_pdf = ""
         doc_monto_neto = 0
         doc_moneda = "CLP"
         doc_fecha_emi = None
@@ -1258,49 +1259,75 @@ if check_password():
 
                         if texto_fact_pdf:
                             import re
-                            
-                            # Moneda
+
+                            # Diccionario de meses para convertir texto a número
+                            meses_es = {
+                                'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+                                'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+                            }
+
+                            # 1. Moneda
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_fact_pdf, re.IGNORECASE):
                                 doc_moneda = "USD"
                             else:
                                 doc_moneda = "CLP"
 
-                            # N° Factura
-                            m_fact = re.search(r'(?:Factura|N[°º]|Folio|DTE)\s*[:#]?\s*(\d+)', texto_fact_pdf, re.IGNORECASE)
+                            # 2. Número de Factura
+                            m_fact = re.search(r'(?:FACTURA\s*ELECTR[OÓ]NICA|Factura|N[°º]|Folio)\s*[:#ºN]*\s*(\d+)', texto_fact_pdf, re.IGNORECASE)
                             if m_fact:
                                 doc_factura = m_fact.group(1).strip()
 
-                            # Empresa / Razon Social
-                            m_emp_f = re.search(r'(?:Señor(?:es)?|Empresa|Raz[oó]n Social|Cliente|Receptor)\s*[:#]?\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                            # 3. Empresa / Cliente
+                            m_emp_f = re.search(r'(?:SEÑOR\(ES\)|Señores|Empresa|Cliente)\s*[:#]?\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_emp_f:
                                 val_ef = m_emp_f.group(1).strip()
-                                val_ef = re.split(r'\b(?:RUT|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
+                                val_ef = re.split(r'\b(?:RUT|R\.U\.T|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
                                 if len(val_ef) > 2:
                                     doc_empresa = val_ef.upper()
 
-                            # Fecha Emision
-                            m_f_emi_f = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n|Fecha)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
-                            if m_f_emi_f:
-                                try:
-                                    str_ff = m_f_emi_f.group(1).replace('/', '-').replace('.', '-')
-                                    doc_fecha_emi = pd.to_datetime(str_ff, dayfirst=True if len(str_ff.split('-')[0]) <= 2 else False).date()
-                                except:
-                                    doc_fecha_emi = date.today()
+                            # 4. Fecha de Emisión (Texto: 24 de Septiembre del 2026 O Numérica)
+                            m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_fact_pdf, re.IGNORECASE)
+                            if m_f_emi_txt:
+                                dia_e = int(m_f_emi_txt.group(1))
+                                mes_e_str = m_f_emi_txt.group(2).lower()
+                                anio_e = int(m_f_emi_txt.group(3))
+                                mes_e = meses_es.get(mes_e_str, 1)
+                                doc_fecha_emi = date(anio_e, mes_e, dia_e)
+                            else:
+                                m_f_emi_num = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
+                                if m_f_emi_num:
+                                    try:
+                                        str_ff = m_f_emi_num.group(1).replace('/', '-').replace('.', '-')
+                                        doc_fecha_emi = pd.to_datetime(str_ff, dayfirst=True if len(str_ff.split('-')[0]) <= 2 else False).date()
+                                    except:
+                                        doc_fecha_emi = date.today()
 
-                            # Fecha Vencimiento
-                            m_f_venc_f = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
-                            if m_f_venc_f:
+                            # 5. Fecha de Vencimiento / Pago
+                            m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
+                            if m_f_venc_pago:
                                 try:
-                                    str_fvf = m_f_venc_f.group(1).replace('/', '-').replace('.', '-')
-                                    doc_fecha_venc = pd.to_datetime(str_fvf, dayfirst=True if len(str_fvf.split('-')[0]) <= 2 else False).date()
+                                    doc_fecha_venc = pd.to_datetime(m_f_venc_pago.group(1)).date()
                                 except:
-                                    if doc_fecha_emi:
-                                        doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
-                            elif doc_fecha_emi:
-                                doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
+                                    pass
+                            else:
+                                m_f_venc_f = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
+                                if m_f_venc_f:
+                                    try:
+                                        str_fvf = m_f_venc_f.group(1).replace('/', '-').replace('.', '-')
+                                        doc_fecha_venc = pd.to_datetime(str_fvf, dayfirst=True if len(str_fvf.split('-')[0]) <= 2 else False).date()
+                                    except:
+                                        if doc_fecha_emi:
+                                            doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
 
-                            # Monto Neto
-                            m_neto_f = re.search(r'(?:Neto|Monto\s*Neto|Subtotal)\s*[:$]?\s*([\d\.\,]+)', texto_fact_pdf, re.IGNORECASE)
+                            # 6. Planta
+                            m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\sáéíóúÁÉÍÓÚñÑ]+)', texto_fact_pdf, re.IGNORECASE)
+                            if m_planta_pdf:
+                                doc_planta_pdf = m_planta_pdf.group(1).strip().split('\n')[0].split('  ')[0].upper()
+                            else:
+                                doc_planta_pdf = ""
+
+                            # 7. Monto Neto
+                            m_neto_f = re.search(r'(?:MONTO\s*NETO|Neto)\s*[:$]?\s*([\d\.\,]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_neto_f:
                                 try:
                                     limp_f = m_neto_f.group(1).replace('.', '').replace(',', '.')
@@ -1308,10 +1335,14 @@ if check_password():
                                 except:
                                     pass
 
-                            # Detalle / Glosa
-                            m_det_f = re.search(r'(?:Detalle|Glosa|Descripci[oó]n|Concepto)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,2})', texto_fact_pdf, re.IGNORECASE)
-                            if m_det_f:
-                                doc_detalle = m_det_f.group(1).strip().upper()
+                            # 8. Detalle del Servicio
+                            m_det_trab = re.search(r'Trabajos\s*OC[^\n]*\n([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                            if m_det_trab:
+                                doc_detalle = m_det_trab.group(1).strip().upper()
+                            else:
+                                m_det_gen = re.search(r'(?:Descripcion|Descripción|Detalle)\s*\n([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                                if m_det_gen:
+                                    doc_detalle = m_det_gen.group(1).strip().upper()
 
                             st.success(f"✅ Factura PDF N° {doc_factura} ({doc_empresa}) leída correctamente. Datos extraídos sin almacenar el archivo.")
                         else:
@@ -1406,7 +1437,7 @@ if check_password():
             
             p_factura = doc_factura
             p_empresa = doc_empresa if doc_empresa else ""
-            p_planta = ""
+            p_planta = doc_planta_pdf if doc_planta_pdf else ""
             p_grupo_serv = "SERVICIO GENERAL"
             p_detalle = doc_detalle if doc_detalle else ""
             p_monto = doc_monto_neto if doc_monto_neto > 0 else 0
@@ -1918,7 +1949,7 @@ if check_password():
                             unsafe_allow_html=True
                         )
                     else:
-                        st.caption("⚠️ Sin correo registrado")
+                        st.caption("⚠️️ Sin correo registrado")
 
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
@@ -2056,7 +2087,7 @@ if check_password():
             df_contactos[['Lead_Score', 'Temperatura_Lead']] = df_contactos.apply(calcular_lead_scoring, axis=1)
         else:
             df_contactos['Lead_Score'] = 0
-            df_contactos['Temperatura_Lead'] = "❄️️ Lead Frío"
+            df_contactos['Temperatura_Lead'] = "❄ Lead Frío"
 
         col_sc1, col_sc2 = st.columns(2)
         with col_sc1:
