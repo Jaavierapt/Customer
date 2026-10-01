@@ -1439,9 +1439,13 @@ if check_password():
                     st.session_state["doc_empresa"] = str(row_c.get("Empresa", "")).strip().upper()
                     st.session_state["doc_planta_pdf"] = str(row_c.get("Planta", "")).strip().upper()
                     st.session_state["doc_grupo_serv"] = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL")).strip().upper()
-                    st.session_state["doc_detalle"] = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
-                    st.session_state["doc_monto_neto"] = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
                     st.session_state["doc_moneda"] = str(row_c.get("Moneda", "CLP")).upper()
+                    
+                    if not st.session_state.get("doc_detalle"):
+                        st.session_state["doc_detalle"] = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
+                    
+                    if not st.session_state.get("doc_monto_neto") or st.session_state.get("doc_monto_neto") == 0:
+                        st.session_state["doc_monto_neto"] = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
                     
                     raw_f_cot = row_c.get("Fecha_Emision")
                     if pd.notna(raw_f_cot) and str(raw_f_cot).strip() not in ["", "None", "NaT"]:
@@ -1449,13 +1453,6 @@ if check_password():
                             st.session_state["doc_fecha_cot"] = pd.to_datetime(raw_f_cot).date()
                         except:
                             st.session_state["doc_fecha_cot"] = date.today()
-                    
-                    raw_f_val = row_c.get("Fecha_Validez")
-                    if pd.notna(raw_f_val) and str(raw_f_val).strip() not in ["", "None", "NaT"]:
-                        try:
-                            st.session_state["doc_fecha_venc"] = pd.to_datetime(raw_f_val).date()
-                        except:
-                            st.session_state["doc_fecha_venc"] = st.session_state["doc_fecha_cot"] + timedelta(days=30)
 
             cot_seleccionada = st.selectbox(
                 "Seleccionar Cotización para importar datos:",
@@ -1465,7 +1462,7 @@ if check_password():
             )
 
             if cot_seleccionada != "--- Sin Enlace ---":
-                st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot']}, Vencimiento: {st.session_state['doc_fecha_venc']})")
+                st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot']})")
 
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
@@ -1551,7 +1548,7 @@ if check_password():
         # =====================================================================
         # APARTADO PARA EDITAR FACTURAS EXISTENTES
         # =====================================================================
-        with st.expander("✏️ Editar Factura Existente (Todas las Secciones)"):
+        with st.expander("✏️️ Editar Factura Existente (Todas las Secciones)"):
             if not df.empty and 'Factura' in df.columns:
                 facturas_list = sorted(df['Factura'].astype(str).unique().tolist())
                 factura_a_editar = st.selectbox("Selecciona la Factura a Modificar:", facturas_list, key="edit_factura_select")
