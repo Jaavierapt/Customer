@@ -858,7 +858,7 @@ if check_password():
             
             if archivo_pdf_cot is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_extraido = ""
@@ -1241,6 +1241,13 @@ if check_password():
         if "doc_detalle" not in st.session_state:
             st.session_state["doc_detalle"] = ""
 
+        # Palabras clave estándar para detección automática de servicio por planta / grupo
+        PALABRAS_CLAVE_SERVICIOS = [
+            "MANTENIMIENTO", "MONITOREO", "MANTENCION", "REPARACION", "INSTALACION",
+            "CONFIGURACION", "CABLEADO", "FIBRA OPTICA", "CAMARAS", "CCTV", "CONTROL DE ACCESO",
+            "SOPORTE", "PROYECTO", "OBRA", "SUMINISTRO", "INSPECCION", "MONTAJE", "REDES"
+        ]
+
         # =====================================================================
         # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS PDF FACTURA
         # =====================================================================
@@ -1326,17 +1333,26 @@ if check_password():
                                 except:
                                     pass
 
-                            # 8. Detalle del Servicio (Extrae todas las líneas del trabajo hasta la tabla)
+                            # 8. Detalle del Servicio (Filtrado por palabras clave, Planta y Grupo de Servicio)
                             lineas_pdf = [l.strip() for l in texto_fact_pdf.split('\n') if l.strip()]
                             det_lineas = []
                             capturando = False
+                            
+                            planta_key = st.session_state.get("doc_planta_pdf", "").upper()
+                            
                             for l in lineas_pdf:
-                                if "Trabajos" in l or "Instalación" in l or "Servicio" in l:
+                                l_upper = l.upper()
+                                # Coincidencia por palabra clave del servicio o por el nombre de la planta
+                                coincide_kw = any(kw in l_upper for kw in PALABRAS_CLAVE_SERVICIOS)
+                                coincide_planta = (planta_key != "" and planta_key in l_upper)
+                                
+                                if "TRABAJOS" in l_upper or "INSTALACIÓN" in l_upper or "SERVICIO" in l_upper or coincide_kw or coincide_planta:
                                     capturando = True
                                 if capturando:
-                                    if any(k in l for k in ["Referencias", "Pagos", "MONTO NETO", "Forma de Pago", "1 SG"]):
+                                    if any(k in l_upper for k in ["REFERENCIAS", "PAGOS", "MONTO NETO", "FORMA DE PAGO", "1 SG"]):
                                         break
                                     det_lineas.append(l)
+                                    
                             if det_lineas:
                                 st.session_state["doc_detalle"] = " ".join(det_lineas).upper()
                             else:
@@ -1438,11 +1454,26 @@ if check_password():
                     row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
                     st.session_state["doc_empresa"] = str(row_c.get("Empresa", "")).strip().upper()
                     st.session_state["doc_planta_pdf"] = str(row_c.get("Planta", "")).strip().upper()
-                    st.session_state["doc_grupo_serv"] = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL")).strip().upper()
+                    
+                    grupo_cot = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL")).strip().upper()
+                    st.session_state["doc_grupo_serv"] = grupo_cot
                     st.session_state["doc_moneda"] = str(row_c.get("Moneda", "CLP")).upper()
                     
-                    if not st.session_state.get("doc_detalle"):
-                        st.session_state["doc_detalle"] = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
+                    # Búsqueda y asignación inteligente del detalle por coincidencia de palabras clave o planta/grupo
+                    cand_detalle = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
+                    planta_actual = st.session_state.get("doc_planta_pdf", "")
+                    
+                    # Extraer párrafos o frases que coincidan con el grupo, la planta o palabras clave
+                    lineas_cand = [c.strip() for c in cand_detalle.split("\n") if c.strip()]
+                    coincidencias = []
+                    for l in lineas_cand:
+                        if any(kw in l for kw in PALABRAS_CLAVE_SERVICIOS) or (planta_actual and planta_actual in l) or (grupo_cot and grupo_cot in l):
+                            coincidencias.append(l)
+                            
+                    if coincidencias:
+                        st.session_state["doc_detalle"] = " / ".join(coincidencias)
+                    else:
+                        st.session_state["doc_detalle"] = cand_detalle
                     
                     if not st.session_state.get("doc_monto_neto") or st.session_state.get("doc_monto_neto") == 0:
                         st.session_state["doc_monto_neto"] = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
@@ -1548,7 +1579,7 @@ if check_password():
         # =====================================================================
         # APARTADO PARA EDITAR FACTURAS EXISTENTES
         # =====================================================================
-        with st.expander("✏️️ Editar Factura Existente (Todas las Secciones)"):
+        with st.expander("✏ Editar Factura Existente (Todas las Secciones)"):
             if not df.empty and 'Factura' in df.columns:
                 facturas_list = sorted(df['Factura'].astype(str).unique().tolist())
                 factura_a_editar = st.selectbox("Selecciona la Factura a Modificar:", facturas_list, key="edit_factura_select")
