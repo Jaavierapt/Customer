@@ -185,9 +185,16 @@ def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", 
     except Exception:
         pass
 
+    # Asegurar un correo único como llave primaria si no viene ingresado
+    email_clean = str(email).strip().lower()
+    if not email_clean:
+        nom_slug = str(nombre).strip().lower().replace(" ", ".") if nombre else "contacto"
+        emp_slug = str(empresa).strip().lower().replace(" ", "") if empresa else "cliente"
+        email_clean = f"{nom_slug}@{emp_slug}.cl"
+
     registro_supa = {
-        "nombre": str(nombre).strip(),
-        "email": str(email).strip().lower(),
+        "nombre": str(nombre).strip() if nombre else str(empresa).strip().upper(),
+        "email": email_clean,
         "estado": str(estado).strip(),
         "telefono": str(telefono).strip(),
         "empresa": str(empresa).strip().upper(),
@@ -337,7 +344,7 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y sincroniza el contacto en la nube."""
+    """Guarda o actualiza cotización en Supabase y sincroniza SIEMPRE el contacto en la nube."""
     try:
         supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
         st.cache_data.clear()
@@ -346,17 +353,22 @@ def guardar_cotizacion(dict_cot):
         
     nom_c = dict_cot.get("Contacto", "").strip()
     em_c = dict_cot.get("Email_Contacto", "").strip()
-    if nom_c or em_c:
-        if not em_c and nom_c:
-            em_c = f"{nom_c.lower().replace(' ', '.')}@{dict_cot.get('Empresa', 'cliente').lower().replace(' ', '')}.cl"
+    emp_c = dict_cot.get("Empresa", "").strip()
+    
+    # Garantizar guardar el contacto aunque falten campos opcionales
+    if nom_c or em_c or emp_c:
+        if not em_c:
+            prefix_nom = nom_c.lower().replace(' ', '.') if nom_c else "contacto"
+            prefix_emp = emp_c.lower().replace(' ', '') if emp_c else "cliente"
+            em_c = f"{prefix_nom}@{prefix_emp}.cl"
             
         estado_contacto = "Ganado" if dict_cot.get("Estado") in ["GANADO", "APROBADA"] else "Propuesta"
         guardar_contacto(
-            nombre=nom_c if nom_c else em_c.split("@")[0].title(),
+            nombre=nom_c if nom_c else f"Contacto {emp_c.upper()}",
             email=em_c,
             estado=estado_contacto,
             telefono=dict_cot.get("Fono_Contacto", ""),
-            empresa=dict_cot.get("Empresa", ""),
+            empresa=emp_c,
             planta=dict_cot.get("Planta", ""),
             valor=dict_cot.get("Monto_Total", 0),
             rol="Tomador de Decisiones"
@@ -379,19 +391,22 @@ def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
             row_c = df_cot.loc[idx_c[0]]
             nom_c = str(row_c.get("Contacto", "")).strip()
             em_c = str(row_c.get("Email_Contacto", "")).strip()
-            if nom_c or em_c:
-                if not em_c and nom_c:
-                    em_c = f"{nom_c.lower().replace(' ', '.')}@{empresa.lower().replace(' ', '')}.cl"
-                guardar_contacto(
-                    nombre=nom_c if nom_c else empresa,
-                    email=em_c if em_c else f"contacto@{empresa.lower().replace(' ', '')}.cl",
-                    estado="Ganado",
-                    telefono=str(row_c.get("Fono_Contacto", "")),
-                    empresa=empresa,
-                    planta=planta,
-                    valor=monto,
-                    rol="Tomador de Decisiones"
-                )
+            
+            if not em_c:
+                prefix_nom = nom_c.lower().replace(' ', '.') if nom_c else "contacto"
+                prefix_emp = empresa.lower().replace(' ', '') if empresa else "cliente"
+                em_c = f"{prefix_nom}@{prefix_emp}.cl"
+                
+            guardar_contacto(
+                nombre=nom_c if nom_c else empresa,
+                email=em_c,
+                estado="Ganado",
+                telefono=str(row_c.get("Fono_Contacto", "")),
+                empresa=empresa,
+                planta=planta,
+                valor=monto,
+                rol="Tomador de Decisiones"
+            )
 
 def eliminar_cotizacion(folio_cot):
     """Elimina una cotización directamente desde Supabase."""
@@ -1102,7 +1117,7 @@ if check_password():
                                 except:
                                     pass
 
-                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
+                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_val:
                                 try:
                                     str_fv = m_f_val.group(1).replace('/', '-').replace('.', '-')
@@ -2077,13 +2092,13 @@ if check_password():
                 submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
 
                 if submitted:
-                    if nombre and correo and empresa:
+                    if (nombre or empresa):
                         guardar_contacto(nombre, correo, estado, celular, empresa, planta, valor, rol)
-                        st.success(f"¡Cliente {nombre} registrado exitosamente en la nube!")
+                        st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
                         st.session_state["active_tab"] = 5
                         st.rerun()
                     else:
-                        st.warning("Por favor completa los campos obligatorios (*).")
+                        st.warning("Por favor completa al menos el Nombre o Empresa.")
       
         st.divider()
 
@@ -2480,7 +2495,7 @@ if check_password():
                 id_tk_del = st.selectbox("Selecciona el Ticket a Eliminar:", lista_del_tk, key="select_tk_del")
                 if id_tk_del:
                     row_tk_d = df_tickets[df_tickets['ID_Ticket'].astype(str) == str(id_tk_del)].iloc[0]
-                    st.warning(f"⚠️ ¿Eliminar permanentemente el Ticket **#{id_tk_del}** ({row_tk_d.get('Asunto', 'N/A')})?")
+                    st.warning(f"⚠️️ ¿Eliminar permanentemente el Ticket **#{id_tk_del}** ({row_tk_d.get('Asunto', 'N/A')})?")
                     if st.button(f"🔥 Confirmar y Eliminar Ticket #{id_tk_del}", key="btn_confirm_del_tk"):
                         eliminar_ticket(id_tk_del)
                         st.success(f"Ticket #{id_tk_del} eliminado correctamente.")
