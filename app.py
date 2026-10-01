@@ -12,21 +12,21 @@ import matplotlib.pyplot as plt
 from supabase import create_client, Client
 import streamlit as st
 
-# Importación ultra-robusta de librerías para lectura de PDF
+# Importación ultra-robusta de librerías para lectura de PDF (Priorizando pdfplumber)
 PDF_READER_AVAILABLE = False
 try:
-    import pypdf
-    PDF_READER_TYPE = "pypdf"
+    import pdfplumber
+    PDF_READER_TYPE = "pdfplumber"
     PDF_READER_AVAILABLE = True
 except ImportError:
     try:
-        import PyPDF2 as pypdf
-        PDF_READER_TYPE = "pypdf2"
+        import pypdf
+        PDF_READER_TYPE = "pypdf"
         PDF_READER_AVAILABLE = True
     except ImportError:
         try:
-            import pdfplumber
-            PDF_READER_TYPE = "pdfplumber"
+            import PyPDF2 as pypdf
+            PDF_READER_TYPE = "pypdf2"
             PDF_READER_AVAILABLE = True
         except ImportError:
             PDF_READER_AVAILABLE = False
@@ -858,24 +858,24 @@ if check_password():
             
             if archivo_pdf_cot is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pypdf` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_extraido = ""
                         pdf_stream = io.BytesIO(archivo_pdf_cot.read())
                         
-                        if PDF_READER_TYPE in ["pypdf", "pypdf2"]:
-                            reader = pypdf.PdfReader(pdf_stream)
-                            for page in reader.pages:
-                                txt_p = page.extract_text()
-                                if txt_p:
-                                    texto_extraido += txt_p + "\n"
-                        elif PDF_READER_TYPE == "pdfplumber":
+                        if PDF_READER_TYPE == "pdfplumber":
                             with pdfplumber.open(pdf_stream) as pdf_doc:
                                 for page in pdf_doc.pages:
                                     txt_p = page.extract_text()
                                     if txt_p:
                                         texto_extraido += txt_p + "\n"
+                        elif PDF_READER_TYPE in ["pypdf", "pypdf2"]:
+                            reader = pypdf.PdfReader(pdf_stream)
+                            for page in reader.pages:
+                                txt_p = page.extract_text()
+                                if txt_p:
+                                    texto_extraido += txt_p + "\n"
 
                         if texto_extraido:
                             import re
@@ -1078,7 +1078,7 @@ if check_password():
         # =====================================================================
         # APARTADO EDITAR COTIZACIÓN EXISTENTE
         # =====================================================================
-        with st.expander("✏️ Editar Cotización Existente"):
+        with st.expander("✏️️ Editar Cotización Existente"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
                 folios_cot_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
                 folio_cot_editar = st.selectbox("Selecciona el Folio de Cotización a Editar:", folios_cot_list, key="select_cot_edit")
@@ -1177,7 +1177,7 @@ if check_password():
         # =====================================================================
         # APARTADO ELIMINAR COTIZACIÓN
         # =====================================================================
-        with st.expander("🗑️ Eliminar Cotización"):
+        with st.expander("🗑️️ Eliminar Cotización"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
                 folios_del_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
                 folio_cot_del = st.selectbox("Selecciona el Folio de Cotización a Eliminar:", folios_del_list, key="select_cot_del")
@@ -1238,55 +1238,57 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pypdf` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
                         pdf_stream_f = io.BytesIO(archivo_pdf_fact.read())
                         
-                        if PDF_READER_TYPE in ["pypdf", "pypdf2"]:
+                        if PDF_READER_TYPE == "pdfplumber":
+                            with pdfplumber.open(pdf_stream_f) as pdf_doc_f:
+                                for page in pdf_doc_f.pages:
+                                    txt_p = page.extract_text(layout=False)
+                                    if txt_p:
+                                        texto_fact_pdf += txt_p + "\n"
+                        elif PDF_READER_TYPE in ["pypdf", "pypdf2"]:
                             reader_f = pypdf.PdfReader(pdf_stream_f)
                             for page in reader_f.pages:
                                 txt_p = page.extract_text()
                                 if txt_p:
                                     texto_fact_pdf += txt_p + "\n"
-                        elif PDF_READER_TYPE == "pdfplumber":
-                            with pdfplumber.open(pdf_stream_f) as pdf_doc_f:
-                                for page in pdf_doc_f.pages:
-                                    txt_p = page.extract_text()
-                                    if txt_p:
-                                        texto_fact_pdf += txt_p + "\n"
 
                         if texto_fact_pdf:
                             import re
 
-                            # Diccionario de meses para convertir texto a número
                             meses_es = {
                                 'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
                                 'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
                             }
 
+                            texto_limpio = " ".join(texto_fact_pdf.split())
+
                             # 1. Moneda
-                            if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_fact_pdf, re.IGNORECASE):
+                            if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_limpio, re.IGNORECASE):
                                 doc_moneda = "USD"
                             else:
                                 doc_moneda = "CLP"
 
                             # 2. Número de Factura
-                            m_fact = re.search(r'(?:FACTURA\s*ELECTR[OÓ]NICA|Factura|N[°º]|Folio)\s*[:#ºN]*\s*(\d+)', texto_fact_pdf, re.IGNORECASE)
+                            m_fact = re.search(r'(?:FACTURA\s*ELECTR[OÓ]NICA|N[°º]|Folio)\s*N[°º]?\s*(\d+)', texto_limpio, re.IGNORECASE)
                             if m_fact:
                                 doc_factura = m_fact.group(1).strip()
 
                             # 3. Empresa / Cliente
-                            m_emp_f = re.search(r'(?:SEÑOR\(ES\)|Señores|Empresa|Cliente)\s*[:#]?\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                            m_emp_f = re.search(r'SEÑOR\(ES\)\s*:\s*([^\n]+?)(?=\s*R\.?U\.?T|GIRO|DIRECCION|$)', texto_fact_pdf, re.IGNORECASE)
                             if m_emp_f:
-                                val_ef = m_emp_f.group(1).strip()
-                                val_ef = re.split(r'\b(?:RUT|R\.U\.T|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
-                                if len(val_ef) > 2:
-                                    doc_empresa = val_ef.upper()
+                                doc_empresa = m_emp_f.group(1).strip().upper()
+                            else:
+                                m_emp_alt = re.search(r'(?:Señor\(es\)|Empresa|Cliente)\s*[:#]?\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                                if m_emp_alt:
+                                    doc_empresa = m_emp_alt.group(1).strip().upper()
 
                             # 4. Fecha de Emisión (Texto: 24 de Septiembre del 2026 O Numérica)
-                            m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_fact_pdf, re.IGNORECASE)
+                            m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_limpio, re.IGNORECASE)
                             if m_f_emi_txt:
                                 dia_e = int(m_f_emi_txt.group(1))
                                 mes_e_str = m_f_emi_txt.group(2).lower()
@@ -1294,7 +1296,7 @@ if check_password():
                                 mes_e = meses_es.get(mes_e_str, 1)
                                 doc_fecha_emi = date(anio_e, mes_e, dia_e)
                             else:
-                                m_f_emi_num = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
+                                m_f_emi_num = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_limpio, re.IGNORECASE)
                                 if m_f_emi_num:
                                     try:
                                         str_ff = m_f_emi_num.group(1).replace('/', '-').replace('.', '-')
@@ -1303,31 +1305,20 @@ if check_password():
                                         doc_fecha_emi = date.today()
 
                             # 5. Fecha de Vencimiento / Pago
-                            m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
+                            m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_limpio, re.IGNORECASE)
                             if m_f_venc_pago:
                                 try:
                                     doc_fecha_venc = pd.to_datetime(m_f_venc_pago.group(1)).date()
                                 except:
                                     pass
-                            else:
-                                m_f_venc_f = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_fact_pdf, re.IGNORECASE)
-                                if m_f_venc_f:
-                                    try:
-                                        str_fvf = m_f_venc_f.group(1).replace('/', '-').replace('.', '-')
-                                        doc_fecha_venc = pd.to_datetime(str_fvf, dayfirst=True if len(str_fvf.split('-')[0]) <= 2 else False).date()
-                                    except:
-                                        if doc_fecha_emi:
-                                            doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
 
                             # 6. Planta
-                            m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\sáéíóúÁÉÍÓÚñÑ]+)', texto_fact_pdf, re.IGNORECASE)
+                            m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\áéíóúÁÉÍÓÚñÑ]+)', texto_limpio, re.IGNORECASE)
                             if m_planta_pdf:
-                                doc_planta_pdf = m_planta_pdf.group(1).strip().split('\n')[0].split('  ')[0].upper()
-                            else:
-                                doc_planta_pdf = ""
+                                doc_planta_pdf = m_planta_pdf.group(1).strip().upper()
 
                             # 7. Monto Neto
-                            m_neto_f = re.search(r'(?:MONTO\s*NETO|Neto)\s*[:$]?\s*([\d\.\,]+)', texto_fact_pdf, re.IGNORECASE)
+                            m_neto_f = re.search(r'MONTO\s*NETO\s*\$?\s*([\d\.\,]+)', texto_limpio, re.IGNORECASE)
                             if m_neto_f:
                                 try:
                                     limp_f = m_neto_f.group(1).replace('.', '').replace(',', '.')
@@ -1336,13 +1327,9 @@ if check_password():
                                     pass
 
                             # 8. Detalle del Servicio
-                            m_det_trab = re.search(r'Trabajos\s*OC[^\n]*\n([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                            m_det_trab = re.search(r'Instalaci[oó]n[^\n]*', texto_fact_pdf, re.IGNORECASE)
                             if m_det_trab:
-                                doc_detalle = m_det_trab.group(1).strip().upper()
-                            else:
-                                m_det_gen = re.search(r'(?:Descripcion|Descripción|Detalle)\s*\n([^\n]+)', texto_fact_pdf, re.IGNORECASE)
-                                if m_det_gen:
-                                    doc_detalle = m_det_gen.group(1).strip().upper()
+                                doc_detalle = m_det_trab.group(0).strip().upper()
 
                             st.success(f"✅ Factura PDF N° {doc_factura} ({doc_empresa}) leída correctamente. Datos extraídos sin almacenar el archivo.")
                         else:
@@ -1672,7 +1659,7 @@ if check_password():
         # =====================================================================
         # APARTADO ELIMINAR FACTURA
         # =====================================================================
-        with st.expander("🗑️ Eliminar Factura"):
+        with st.expander("🗑️️ Eliminar Factura"):
             if not df.empty and 'Factura' in df.columns:
                 facturas_del_list = sorted(df['Factura'].astype(str).unique().tolist())
                 factura_a_eliminar = st.selectbox("Selecciona el Número de Factura a Eliminar:", facturas_del_list, key="select_factura_del")
@@ -1949,7 +1936,7 @@ if check_password():
                             unsafe_allow_html=True
                         )
                     else:
-                        st.caption("⚠️️ Sin correo registrado")
+                        st.caption("⚠️ Sin correo registrado")
 
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
