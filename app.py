@@ -242,6 +242,70 @@ def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", 
     df_cont = pd.concat([df_cont, nueva_fila], ignore_index=True)
     df_cont.to_csv(ARCHIVO_CONTACTOS, index=False)
 
+# --- GESTIÓN GLOBAL UNIVERSAL DE TICKETS (SUPABASE) ---
+ARCHIVO_TICKETS = "tickets_soporte.csv"
+
+def cargar_tickets():
+    """Carga tickets de soporte desde Supabase (visibilidad universal para todos los usuarios) con fallback local."""
+    try:
+        res = supabase.table("tickets").select("*").execute()
+        if res.data:
+            df_t = pd.DataFrame(res.data)
+            col_m = {
+                "id_ticket": "ID_Ticket",
+                "empresa": "Empresa",
+                "contacto": "Contacto",
+                "asunto": "Asunto",
+                "estado": "Estado",
+                "prioridad": "Prioridad",
+                "fecha": "Fecha",
+                "creado_por": "Creado_Por"
+            }
+            df_t = df_t.rename(columns={k: v for k, v in col_m.items() if k in df_t.columns})
+            for c_req in ["ID_Ticket", "Empresa", "Contacto", "Asunto", "Estado", "Prioridad", "Fecha", "Creado_Por"]:
+                if c_req not in df_t.columns:
+                    df_t[c_req] = ""
+            return df_t
+    except Exception:
+        pass
+
+    if os.path.exists(ARCHIVO_TICKETS):
+        return pd.read_csv(ARCHIVO_TICKETS)
+
+    return pd.DataFrame(columns=["ID_Ticket", "Empresa", "Contacto", "Asunto", "Estado", "Prioridad", "Fecha", "Creado_Por"])
+
+def guardar_ticket(dict_ticket):
+    """Guarda o actualiza un ticket en Supabase y localmente."""
+    df_t = cargar_tickets()
+    df_t = pd.concat([df_t[df_t['ID_Ticket'].astype(str) != str(dict_ticket['ID_Ticket'])], pd.DataFrame([dict_ticket])], ignore_index=True)
+    df_t.to_csv(ARCHIVO_TICKETS, index=False)
+
+    supa_dict = {
+        "id_ticket": str(dict_ticket.get("ID_Ticket", "")),
+        "empresa": str(dict_ticket.get("Empresa", "")),
+        "contacto": str(dict_ticket.get("Contacto", "")),
+        "asunto": str(dict_ticket.get("Asunto", "")),
+        "estado": str(dict_ticket.get("Estado", "")),
+        "prioridad": str(dict_ticket.get("Prioridad", "")),
+        "fecha": str(dict_ticket.get("Fecha", "")),
+        "creado_por": str(dict_ticket.get("Creado_Por", ""))
+    }
+    try:
+        supabase.table("tickets").upsert(supa_dict).execute()
+    except Exception:
+        pass
+
+def eliminar_ticket(id_ticket):
+    """Elimina un ticket en Supabase y localmente."""
+    df_t = cargar_tickets()
+    if not df_t.empty:
+        df_t = df_t[df_t['ID_Ticket'].astype(str) != str(id_ticket)]
+        df_t.to_csv(ARCHIVO_TICKETS, index=False)
+    try:
+        supabase.table("tickets").delete().eq("id_ticket", str(id_ticket)).execute()
+    except Exception:
+        pass
+
 # --- GESTIÓN DE COTIZACIONES ---
 ARCHIVO_COTIZACIONES = "cotizaciones.csv"
 
@@ -574,12 +638,9 @@ def generar_pdf(df_original):
 # =============================================================================
 if check_password():
     ARCHIVO_CONTACTOS = "contactos.csv"
-    ARCHIVO_TICKETS = "tickets_soporte.csv"
     ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
 
-    if not os.path.exists(ARCHIVO_TICKETS):
-        pd.DataFrame(columns=["ID_Ticket", "Empresa", "Asunto", "Estado", "Prioridad", "Fecha"]).to_csv(ARCHIVO_TICKETS, index=False)
-    df_tickets = pd.read_csv(ARCHIVO_TICKETS)
+    df_tickets = cargar_tickets()
 
     if not os.path.exists(ARCHIVO_HISTORIAL_INTERACCIONES):
         pd.DataFrame(columns=["Nombre_Contacto", "Empresa", "Tipo", "Detalle", "Fecha"]).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
@@ -670,17 +731,24 @@ if check_password():
 
         st.divider()
 
-        st.subheader("🛠️ Estado de Soporte Técnico")
+        st.subheader("🛠️ Estado Global de Soporte Técnico y Tickets")
         if not df_tickets.empty:
             tickets_abiertos = df_tickets[df_tickets['Estado'] != 'Cerrado']
-            k_t1, k_t2 = st.columns(2)
+            tickets_urgentes = df_tickets[(df_tickets['Estado'] != 'Cerrado') & (df_tickets['Prioridad'] == '🚨 Urgente / Crítica')]
+            
+            k_t1, k_t2, k_t3 = st.columns(3)
             k_t1.metric("Tickets Activos / Abiertos", len(tickets_abiertos))
-            k_t2.metric("Total Histórico de Tickets", len(df_tickets))
-            if not tickets_abiertos.empty:
-                with st.expander("Ver detalle de tickets abiertos"):
-                    st.dataframe(tickets_abiertos, hide_index=True)
+            k_t2.metric("🚨 Tickets URGENTES", len(tickets_urgentes))
+            k_t3.metric("Total Histórico de Tickets", len(df_tickets))
+            
+            if not tickets_urgentes.empty:
+                st.error(f"🚨 **Hay {len(tickets_urgentes)} ticket(s) URGENTE(S) pendiente(s) de atención:**")
+                st.dataframe(tickets_urgentes[['ID_Ticket', 'Empresa', 'Contacto', 'Asunto', 'Fecha', 'Creado_Por']], hide_index=True, use_container_width=True)
+            elif not tickets_abiertos.empty:
+                with st.expander("Ver detalle de todos los tickets abiertos (Universal)"):
+                    st.dataframe(tickets_abiertos[['ID_Ticket', 'Empresa', 'Contacto', 'Asunto', 'Prioridad', 'Fecha', 'Creado_Por']], hide_index=True, use_container_width=True)
         else:
-            st.info("No hay tickets de soporte registrados.")
+            st.info("No hay tickets de soporte registrados en el sistema.")
 
         st.divider()
 
@@ -800,7 +868,7 @@ if check_password():
                 else:
                     st.success("✨ ¡Todo en orden! No se registran caídas críticas de pagos mensuales.")
             else:
-                st.info("ℹ️️ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
+                st.info("ℹ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
         else:
             st.info("ℹ Columnas necesarias no disponibles.")
            
@@ -2023,7 +2091,7 @@ if check_password():
         st.divider()
           
     # =========================================================================
-    # SECCIÓN: EMBUDO DE VENTAS (ACCESIBLE Y EDITABLE DIRECTAMENTE PARA TODOS)
+    # SECCIÓN: EMBUDO DE VENTAS Y MÓDULO UNIVERSAL DE SOPORTE Y TICKETS
     # =========================================================================
     with tab5:
         st.header("🔥 Embudo de Ventas y Métricas Comerciales")
@@ -2156,7 +2224,7 @@ if check_password():
                             unsafe_allow_html=True
                         )
                     else:
-                        st.caption("⚠️️ Sin correo registrado")
+                        st.caption("⚠ Sin correo registrado")
 
                     # MODAL / EXPANDER DE EDICIÓN RÁPIDA EN LA MISMA TARJETA
                     with st.expander(f"✏️ Editar Tarjeta ({row.get('Nombre', 'Contacto')})"):
@@ -2256,7 +2324,7 @@ if check_password():
                                 df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
                                 st.rerun()
 
-                    with st.expander(f"⏱️ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
+                    with st.expander(f"⏱️️ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
                         filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row.get('Nombre')]
                         if not filtro_inter.empty:
                             for _, inter_row in filtro_inter.iterrows():
@@ -2377,25 +2445,141 @@ if check_password():
 
         st.divider()
 
-        st.subheader("🛠️ Módulo de Soporte y Tickets (Helpdesk)")
-        with st.expander("➕ Crear Nuevo Ticket de Soporte"):
-            with st.form("form_ticket"):
-                t_empresa = st.selectbox("Empresa del Cliente", sorted(df['Empresa'].unique()))
-                t_asunto = st.text_input("Asunto / Problema Técnico")
-                t_prioridad = st.selectbox("Prioridad", ["Baja", "Media", "Alta", "Crítica"])
-                t_estado = st.selectbox("Estado del Ticket", ["Abierto", "En Proceso", "Cerrado"])
-                if st.form_submit_button("Guardar Ticket"):
-                    nuevo_t = pd.DataFrame([{
-                        "ID_Ticket": f"TKT-{len(df_tickets)+1:03d}",
-                        "Empresa": t_empresa,
-                        "Asunto": t_asunto,
-                        "Estado": t_estado,
-                        "Prioridad": t_prioridad,
-                        "Fecha": datetime.now().strftime("%Y-%m-%d")
-                    }])
-                    pd.concat([df_tickets, nuevo_t], ignore_index=True).to_csv(ARCHIVO_TICKETS, index=False)
-                    st.success("¡Ticket creado con éxito!")
-                    st.rerun()
+        # =====================================================================
+        # MÓDULO UNIVERSAL DE SOPORTE Y TICKETS (CREAR, EDITAR, ELIMINAR, VINCULAR)
+        # =====================================================================
+        st.subheader("🛠️ Módulo Universal de Soporte y Tickets (Helpdesk)")
+        
+        # Preparar opciones de contactos para vinculación
+        lista_contactos_opciones = ["--- Sin Contacto Específico ---"]
+        if not df_contactos.empty:
+            for _, r_cont in df_contactos.iterrows():
+                n_c = str(r_cont.get('Nombre', '')).strip()
+                e_c = str(r_cont.get('Empresa', '')).strip()
+                if n_c or e_c:
+                    lista_contactos_opciones.append(f"{n_c} ({e_c})")
+
+        # 1. CREAR TICKET
+        with st.expander("➕ Crear Nuevo Ticket de Soporte", expanded=False):
+            with st.form("form_ticket_universal", clear_on_submit=True):
+                col_tk1, col_tk2 = st.columns(2)
+                
+                empresas_disp = sorted(df['Empresa'].unique()) if not df.empty else ["EMPRESA GENERAL"]
+                
+                with col_tk1:
+                    tk_empresa = st.selectbox("Empresa del Cliente *", empresas_disp)
+                    tk_contacto_sel = st.selectbox("Contacto Asociado (CRM)", lista_contactos_opciones)
+                    tk_asunto = st.text_input("Asunto / Problema Técnico *")
+                    
+                with col_tk2:
+                    tk_prioridad = st.selectbox("Prioridad *", ["🟢 Puede Esperar / Baja", "🟡 Media", "🟧 Alta", "🚨 Urgente / Crítica"])
+                    tk_estado = st.selectbox("Estado inicial", ["Abierto", "En Proceso", "Cerrado"])
+                
+                if st.form_submit_button("💾 Crear y Sincronizar Ticket Universal"):
+                    if tk_asunto.strip():
+                        contacto_final = tk_contacto_sel if tk_contacto_sel != "--- Sin Contacto Específico ---" else f"Contacto General {tk_empresa}"
+                        nuevo_id = f"TKT-{len(df_tickets)+1:03d}"
+                        
+                        dict_tk = {
+                            "ID_Ticket": nuevo_id,
+                            "Empresa": tk_empresa,
+                            "Contacto": contacto_final,
+                            "Asunto": tk_asunto.strip(),
+                            "Estado": tk_estado,
+                            "Prioridad": tk_prioridad,
+                            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "Creado_Por": st.session_state.get('user_email', 'Sistema')
+                        }
+                        
+                        guardar_ticket(dict_tk)
+                        st.cache_data.clear()
+                        st.success(f"¡Ticket #{nuevo_id} registrado y publicado globalmente!")
+                        st.rerun()
+                    else:
+                        st.warning("Escribe un asunto para el ticket.")
+
+        # 2. EDITAR TICKET EXISTENTE
+        with st.expander("✏️ Editar Ticket Existente", expanded=False):
+            if not df_tickets.empty and 'ID_Ticket' in df_tickets.columns:
+                lista_ids_tk = sorted(df_tickets['ID_Ticket'].astype(str).unique().tolist())
+                id_tk_editar = st.selectbox("Selecciona el ID del Ticket a Modificar:", lista_ids_tk, key="select_tk_edit")
+                
+                if id_tk_editar:
+                    row_tk_edit = df_tickets[df_tickets['ID_Ticket'].astype(str) == str(id_tk_editar)].iloc[0]
+                    
+                    with st.form(f"form_edit_tk_{id_tk_editar}"):
+                        etk_col1, etk_col2 = st.columns(2)
+                        
+                        empresas_disp = sorted(df['Empresa'].unique()) if not df.empty else ["EMPRESA GENERAL"]
+                        idx_emp_tk = empresas_disp.index(row_tk_edit.get('Empresa')) if row_tk_edit.get('Empresa') in empresas_disp else 0
+                        
+                        with etk_col1:
+                            etk_empresa = st.selectbox("Empresa", empresas_disp, index=idx_emp_tk, key=f"e_emp_tk_{id_tk_editar}")
+                            
+                            cont_act_tk = str(row_tk_edit.get('Contacto', ''))
+                            if cont_act_tk and cont_act_tk not in lista_contactos_opciones:
+                                lista_contactos_opciones.append(cont_act_tk)
+                            idx_cont_tk = lista_contactos_opciones.index(cont_act_tk) if cont_act_tk in lista_contactos_opciones else 0
+                            etk_contacto = st.selectbox("Contacto Asociado", lista_contactos_opciones, index=idx_cont_tk, key=f"e_cont_tk_{id_tk_editar}")
+                            
+                            etk_asunto = st.text_input("Asunto", value=str(row_tk_edit.get('Asunto', '')))
+
+                        with etk_col2:
+                            prio_opts = ["🟢 Puede Esperar / Baja", "🟡 Media", "🟧 Alta", "🚨 Urgente / Crítica"]
+                            prio_act = str(row_tk_edit.get('Prioridad', '🟡 Media'))
+                            idx_prio = prio_opts.index(prio_act) if prio_act in prio_opts else 1
+                            etk_prioridad = st.selectbox("Prioridad", prio_opts, index=idx_prio, key=f"e_prio_tk_{id_tk_editar}")
+                            
+                            est_opts = ["Abierto", "En Proceso", "Cerrado"]
+                            est_act = str(row_tk_edit.get('Estado', 'Abierto'))
+                            idx_est_tk = est_opts.index(est_act) if est_act in est_opts else 0
+                            etk_estado = st.selectbox("Estado", est_opts, index=idx_est_tk, key=f"e_est_tk_{id_tk_editar}")
+
+                        if st.form_submit_button("💾 Guardar Cambios en Ticket"):
+                            dict_tk_edit = {
+                                "ID_Ticket": str(id_tk_editar),
+                                "Empresa": etk_empresa,
+                                "Contacto": etk_contacto,
+                                "Asunto": etk_asunto.strip(),
+                                "Estado": etk_estado,
+                                "Prioridad": etk_prioridad,
+                                "Fecha": str(row_tk_edit.get('Fecha', datetime.now().strftime("%Y-%m-%d"))),
+                                "Creado_Por": str(row_tk_edit.get('Creado_Por', 'Sistema'))
+                            }
+                            guardar_ticket(dict_tk_edit)
+                            st.cache_data.clear()
+                            st.success(f"¡Ticket #{id_tk_editar} actualizado exitosamente!")
+                            st.rerun()
+            else:
+                st.info("No hay tickets registrados para editar.")
+
+        # 3. ELIMINAR TICKET
+        with st.expander("🗑️ Eliminar Ticket de Soporte", expanded=False):
+            if not df_tickets.empty and 'ID_Ticket' in df_tickets.columns:
+                lista_del_tk = sorted(df_tickets['ID_Ticket'].astype(str).unique().tolist())
+                id_tk_del = st.selectbox("Selecciona el Ticket a Eliminar:", lista_del_tk, key="select_tk_del")
+                if id_tk_del:
+                    row_tk_d = df_tickets[df_tickets['ID_Ticket'].astype(str) == str(id_tk_del)].iloc[0]
+                    st.warning(f"⚠️ ¿Eliminar permanentemente el Ticket **#{id_tk_del}** ({row_tk_d.get('Asunto', 'N/A')})?")
+                    if st.button(f"🔥 Confirmar y Eliminar Ticket #{id_tk_del}", key="btn_confirm_del_tk"):
+                        eliminar_ticket(id_tk_del)
+                        st.cache_data.clear()
+                        st.success(f"Ticket #{id_tk_del} eliminado correctamente.")
+                        st.rerun()
+            else:
+                st.info("No hay tickets registrados para eliminar.")
+
+        st.divider()
+
+        st.subheader("📋 Tablero Universal de Tickets Registrados")
+        if not df_tickets.empty:
+            st.dataframe(
+                df_tickets[["ID_Ticket", "Empresa", "Contacto", "Asunto", "Prioridad", "Estado", "Fecha", "Creado_Por"]],
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No hay tickets registrados en el sistema.")
 
         st.divider()
 
