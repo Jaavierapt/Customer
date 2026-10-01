@@ -137,36 +137,59 @@ def eliminar_factura(numero_factura):
         return False
 
 def cargar_contactos():
-    """Consulta todos los registros de la tabla 'Contactos' en Supabase o fallback local."""
-    data = []
+    """Consulta los registros de la tabla 'Contactos' en Supabase como fuente primaria para garantizar persistencia."""
     try:
         response = supabase.table("Contactos").select("*").execute()
-        data = response.data
-    except Exception:
-        pass
-    
-    if data:
-        df_c = pd.DataFrame(data)
-    else:
-        ARCHIVO_CONTACTOS = "contactos.csv"
-        if os.path.exists(ARCHIVO_CONTACTOS):
-            df_c = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
-        else:
-            df_c = pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
-
-    # --- SINCRO AUTOMÁTICA CON FACTURAS: SI YA TIENE FACTURA REGISTRADA -> PASA A 'GANADO' EN EL EMBUDO ---
-    try:
-        df_facturas_exist = cargar_datos()
-        if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
-            empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+        if response.data:
+            df_c = pd.DataFrame(response.data)
             
-            # Sincronizar en memoria
-            mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
-            df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
+            # Normalización de columnas recibidas desde Supabase
+            col_map = {
+                "nombre": "Nombre",
+                "email": "Correo",
+                "estado": "Estado",
+                "telefono": "Celular",
+                "empresa": "Empresa",
+                "planta": "Planta",
+                "valor": "Valor",
+                "rol": "Rol_Contacto",
+                "bitacora": "Bitacora"
+            }
+            df_c = df_c.rename(columns={k: v for k, v in col_map.items() if k in df_c.columns})
+
+            for col_req in ["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"]:
+                if col_req not in df_c.columns:
+                    df_c[col_req] = ""
+
+            # Sincronización automática con facturas existentes -> Estado "Ganado"
+            try:
+                df_facturas_exist = cargar_datos()
+                if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
+                    empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+                    mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
+                    df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
+            except Exception:
+                pass
+
+            return df_c
     except Exception:
         pass
 
-    return df_c
+    # Fallback local únicamente si falla la conexión a la base de datos de Supabase
+    ARCHIVO_CONTACTOS = "contactos.csv"
+    if os.path.exists(ARCHIVO_CONTACTOS):
+        df_c = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
+        try:
+            df_facturas_exist = cargar_datos()
+            if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
+                empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+                mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
+                df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
+        except Exception:
+            pass
+        return df_c
+
+    return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
     """Inserta o actualiza un contacto en la base de datos de Supabase y en el archivo local."""
@@ -186,7 +209,11 @@ def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", 
         "nombre": nombre,
         "email": email,
         "estado": estado,
-        "telefono": telefono
+        "telefono": telefono,
+        "empresa": empresa,
+        "planta": planta,
+        "valor": int(valor),
+        "rol": rol
     }
     
     try:
@@ -773,9 +800,9 @@ if check_password():
                 else:
                     st.success("✨ ¡Todo en orden! No se registran caídas críticas de pagos mensuales.")
             else:
-                st.info("ℹ️ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
+                st.info("ℹ️️ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
         else:
-            st.info("ℹ️️ Columnas necesarias no disponibles.")
+            st.info("ℹ Columnas necesarias no disponibles.")
            
         st.divider()
 
@@ -2129,7 +2156,7 @@ if check_password():
                             unsafe_allow_html=True
                         )
                     else:
-                        st.caption("⚠️ Sin correo registrado")
+                        st.caption("⚠️️ Sin correo registrado")
 
                     # MODAL / EXPANDER DE EDICIÓN RÁPIDA EN LA MISMA TARJETA
                     with st.expander(f"✏️ Editar Tarjeta ({row.get('Nombre', 'Contacto')})"):
