@@ -176,7 +176,6 @@ def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", 
     except Exception:
         pass
         
-    # Sincronizar archivo local CSV
     df_cont = cargar_contactos()
     if not df_cont.empty and 'Correo' in df_cont.columns:
         df_cont = df_cont[df_cont['Correo'].astype(str).str.lower() != str(email).lower()]
@@ -247,22 +246,56 @@ def guardar_cotizacion(dict_cot):
     except Exception:
         pass
         
-    # Auto-guardar contacto en el CRM si trae email o nombre
     nom_c = dict_cot.get("Contacto", "").strip()
     em_c = dict_cot.get("Email_Contacto", "").strip()
     if nom_c or em_c:
         if not em_c and nom_c:
             em_c = f"{nom_c.lower().replace(' ', '.')}@{dict_cot.get('Empresa', 'cliente').lower().replace(' ', '')}.cl"
+            
+        estado_contacto = "Ganado" if dict_cot.get("Estado") in ["GANADO", "APROBADA"] else "Propuesta"
         guardar_contacto(
             nombre=nom_c if nom_c else em_c.split("@")[0].title(),
             email=em_c,
-            estado="Propuesta" if dict_cot.get("Estado") == "APROBADA" else "Prospecto",
+            estado=estado_contacto,
             telefono=dict_cot.get("Fono_Contacto", ""),
             empresa=dict_cot.get("Empresa", ""),
             planta=dict_cot.get("Planta", ""),
             valor=dict_cot.get("Monto_Total", 0),
             rol="Tomador de Decisiones"
         )
+
+def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
+    """Actualiza el estado de una cotización y su contacto a GANADO cuando se enlaza a una factura."""
+    if not folio_cot or folio_cot == "--- Sin Enlace ---":
+        return
+    try:
+        supabase.table("cotizaciones").update({"Estado": "GANADO"}).eq("Folio", str(folio_cot)).execute()
+    except Exception:
+        pass
+        
+    df_cot = cargar_cotizaciones()
+    if not df_cot.empty and 'Folio' in df_cot.columns:
+        idx_c = df_cot[df_cot['Folio'].astype(str) == str(folio_cot)].index
+        if not idx_c.empty:
+            df_cot.loc[idx_c, 'Estado'] = 'GANADO'
+            df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
+            
+            row_c = df_cot.loc[idx_c[0]]
+            nom_c = str(row_c.get("Contacto", "")).strip()
+            em_c = str(row_c.get("Email_Contacto", "")).strip()
+            if nom_c or em_c:
+                if not em_c and nom_c:
+                    em_c = f"{nom_c.lower().replace(' ', '.')}@{empresa.lower().replace(' ', '')}.cl"
+                guardar_contacto(
+                    nombre=nom_c if nom_c else empresa,
+                    email=em_c if em_c else f"contacto@{empresa.lower().replace(' ', '')}.cl",
+                    estado="Ganado",
+                    telefono=str(row_c.get("Fono_Contacto", "")),
+                    empresa=empresa,
+                    planta=planta,
+                    valor=monto,
+                    rol="Tomador de Decisiones"
+                )
 
 def eliminar_cotizacion(folio_cot):
     """Elimina una cotización en Supabase y en el archivo local CSV."""
@@ -927,7 +960,7 @@ if check_password():
             
             if archivo_pdf_cot is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_extraido = ""
@@ -974,7 +1007,7 @@ if check_password():
                                 except:
                                     pass
 
-                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
+                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_val:
                                 try:
                                     str_fv = m_f_val.group(1).replace('/', '-').replace('.', '-')
@@ -1135,11 +1168,11 @@ if check_password():
                             "Monto_Neto": int(cot_neto),
                             "Monto_IVA": calc_iva,
                             "Monto_Total": calc_total,
-                            "Estado": "APROBADA"
+                            "Estado": "PENDIENTE"
                         }
                         guardar_cotizacion(dict_guardar)
                         st.cache_data.clear()
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente en {cot_moneda} y contacto sincronizado en el CRM!")
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente en {cot_moneda} y contacto registrado como Propuesta!")
                         st.rerun()
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
@@ -1178,8 +1211,8 @@ if check_password():
                             ec_contacto = st.text_input("Contacto Cliente", value=str(row_c_edit.get('Contacto', '')))
                             ec_email_cont = st.text_input("Email Contacto", value=str(row_c_edit.get('Email_Contacto', '')))
                             ec_fono_cont = st.text_input("Fono Contacto", value=str(row_c_edit.get('Fono_Contacto', '')))
-                            ec_estado = st.selectbox("Estado", ["APROBADA", "PENDIENTE", "RECHAZADA"], 
-                                                     index=["APROBADA", "PENDIENTE", "RECHAZADA"].index(row_c_edit.get('Estado', 'APROBADA')) if row_c_edit.get('Estado') in ["APROBADA", "PENDIENTE", "RECHAZADA"] else 0)
+                            ec_estado = st.selectbox("Estado", ["PENDIENTE", "GANADO", "RECHAZADA"], 
+                                                     index=["PENDIENTE", "GANADO", "RECHAZADA"].index(row_c_edit.get('Estado', 'PENDIENTE')) if row_c_edit.get('Estado') in ["PENDIENTE", "GANADO", "RECHAZADA"] else 0)
 
                         with ec_col3:
                             ec_ejecutivo = st.text_input("Ejecutivo", value=str(row_c_edit.get('Ejecutivo', '')))
@@ -1624,19 +1657,22 @@ if check_password():
                         try:
                             supabase.table("ingresos").upsert(nuevo_registro_supa).execute()
                             
-                            # Registrar automáticamente empresa/planta como contacto activo si no existe
-                            guardar_contacto(
-                                nombre=f"Contacto {n_empresa_ins.strip().upper()}",
-                                email=f"contacto@{n_empresa_ins.strip().lower().replace(' ', '')}.cl",
-                                estado="Ganado" if n_estado_pago == "Pagado" else "Propuesta",
-                                empresa=n_empresa_ins.strip().upper(),
-                                planta=n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
-                                valor=int(n_monto),
-                                rol="Finanzas / Compras"
-                            )
+                            # Actualización automática: Marca la cotización enlazada como GANADA y actualiza el contacto
+                            if cot_seleccionada != "--- Sin Enlace ---":
+                                marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
+                            else:
+                                guardar_contacto(
+                                    nombre=f"Contacto {n_empresa_ins.strip().upper()}",
+                                    email=f"contacto@{n_empresa_ins.strip().lower().replace(' ', '')}.cl",
+                                    estado="Ganado",
+                                    empresa=n_empresa_ins.strip().upper(),
+                                    planta=n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
+                                    valor=int(n_monto),
+                                    rol="Finanzas / Compras"
+                                )
                             
                             st.cache_data.clear()
-                            st.success(f"¡Factura #{n_factura} guardada y sincronizada exitosamente en Supabase!")
+                            st.success(f"¡Factura #{n_factura} guardada y cotización convertida a GANADO exitosamente!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
@@ -1891,7 +1927,7 @@ if check_password():
         st.divider()
           
     # =========================================================================
-    # SECCIÓN: EMBUDO DE VENTAS (ACCESIBLE Y VISIBLE PARA TODOS LOS USUARIOS)
+    # SECCIÓN: EMBUDO DE VENTAS (ACCESIBLE Y EDITABLE DIRECTAMENTE)
     # =========================================================================
     with tab5:
         st.header("🔥 Embudo de Ventas y Métricas Comerciales")
@@ -1985,8 +2021,8 @@ if check_password():
         st.plotly_chart(fig_funnel, use_container_width=True)
         st.divider()
 
-        # TABLERO KANBAN VISIBLE PARA TODOS LOS USUARIOS
-        st.subheader("📌 Tablero de Contactos por Etapa del Embudo (Visibilidad Global)")
+        # TABLERO KANBAN CON EDICIÓN DIRECTA EN TARJETA
+        st.subheader("📌 Tablero de Contactos por Etapa del Embudo (Edición Directa)")
         cols = st.columns(5)
        
         for i, col in enumerate(cols):
@@ -2025,6 +2061,40 @@ if check_password():
                         )
                     else:
                         st.caption("⚠️ Sin correo registrado")
+
+                    # MODAL / EXPANDER DE EDICIÓN RÁPIDA EN LA MISMA TARJETA
+                    with st.expander(f"✏️ Editar Tarjeta ({row.get('Nombre', 'Contacto')})"):
+                        with st.form(f"form_quick_edit_card_{idx}"):
+                            qe_nombre = st.text_input("Nombre", value=str(row.get('Nombre', '')))
+                            qe_empresa = st.text_input("Empresa", value=str(row.get('Empresa', '')))
+                            qe_planta = st.text_input("Planta", value=str(row.get('Planta', '')))
+                            qe_correo = st.text_input("Correo", value=str(correo_contacto))
+                            qe_celular = st.text_input("Celular", value=str(row.get('Celular', '')))
+                            
+                            roles_op = ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"]
+                            rol_act = str(row.get('Rol_Contacto', 'Influenciador'))
+                            idx_rol = roles_op.index(rol_act) if rol_act in roles_op else 1
+                            qe_rol = st.selectbox("Rol", roles_op, index=idx_rol)
+                            
+                            qe_valor = st.number_input("Valor", value=int(row.get('Valor', 0)) if pd.notna(row.get('Valor')) else 0, min_value=0, step=1000)
+                            
+                            idx_est_card = estados.index(row['Estado']) if row['Estado'] in estados else 0
+                            qe_estado = st.selectbox("Etapa / Estado", estados, index=idx_est_card)
+                            
+                            if st.form_submit_button("💾 Guardar Cambios"):
+                                guardar_contacto(
+                                    nombre=qe_nombre,
+                                    email=qe_correo,
+                                    estado=qe_estado,
+                                    telefono=qe_celular,
+                                    empresa=qe_empresa,
+                                    planta=qe_planta,
+                                    valor=qe_valor,
+                                    rol=qe_rol
+                                )
+                                st.success("¡Tarjeta actualizada!")
+                                st.session_state["active_tab"] = 5
+                                st.rerun()
 
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
