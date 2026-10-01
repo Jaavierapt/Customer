@@ -1226,10 +1226,14 @@ if check_password():
             st.session_state["doc_empresa"] = ""
         if "doc_planta_pdf" not in st.session_state:
             st.session_state["doc_planta_pdf"] = ""
+        if "doc_grupo_serv" not in st.session_state:
+            st.session_state["doc_grupo_serv"] = "SERVICIO GENERAL"
         if "doc_monto_neto" not in st.session_state:
             st.session_state["doc_monto_neto"] = 0
         if "doc_moneda" not in st.session_state:
             st.session_state["doc_moneda"] = "CLP"
+        if "doc_fecha_cot" not in st.session_state:
+            st.session_state["doc_fecha_cot"] = date.today()
         if "doc_fecha_emi" not in st.session_state:
             st.session_state["doc_fecha_emi"] = date.today()
         if "doc_fecha_venc" not in st.session_state:
@@ -1246,7 +1250,7 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
@@ -1424,67 +1428,66 @@ if check_password():
         # =====================================================================
         # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES, PDF O XML)
         # =====================================================================
-        with st.expander("➕ Crear Nueva Factura / Registro de Ingreso"):
+        with st.expander("➕ Crear Nueva Factura / Registro de Ingreso", expanded=True):
             st.markdown("### 🔗 Enlazar desde Cotización Existente (Opcional)")
             cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
-            cot_sel = st.selectbox("Seleccionar Cotización para importar datos:", ["--- Sin Enlace ---"] + cotizaciones_list, key="select_cot_to_fact")
             
-            p_factura = st.session_state["doc_factura"]
-            p_empresa = st.session_state["doc_empresa"]
-            p_planta = st.session_state["doc_planta_pdf"]
-            p_grupo_serv = "SERVICIO GENERAL"
-            p_detalle = st.session_state["doc_detalle"]
-            p_monto = st.session_state["doc_monto_neto"]
-            p_moneda = st.session_state["doc_moneda"]
-            p_fecha_cot = date.today()
-            p_fecha_emi = st.session_state["doc_fecha_emi"]
-            p_fecha_venc = st.session_state["doc_fecha_venc"]
-            
-            if cot_sel != "--- Sin Enlace ---":
-                row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
-                p_empresa = str(row_c.get("Empresa", ""))
-                p_planta = str(row_c.get("Planta", ""))
-                p_grupo_serv = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL"))
-                p_detalle = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", "")))
-                p_monto = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
-                p_moneda = str(row_c.get("Moneda", "CLP")).upper()
-                
-                raw_f_cot = row_c.get("Fecha_Emision")
-                if pd.notna(raw_f_cot) and str(raw_f_cot).strip() not in ["", "None", "NaT"]:
-                    try:
-                        p_fecha_cot = pd.to_datetime(raw_f_cot).date()
-                    except:
-                        p_fecha_cot = date.today()
-                
-                raw_f_val = row_c.get("Fecha_Validez")
-                if pd.notna(raw_f_val) and str(raw_f_val).strip() not in ["", "None", "NaT"]:
-                    try:
-                        p_fecha_venc = pd.to_datetime(raw_f_val).date()
-                    except:
-                        p_fecha_venc = p_fecha_cot + timedelta(days=30)
-                        
-                st.info(f"💡 Todos los datos e información fueron vinculados desde Cotización Folio **#{cot_sel}** (Fecha Cotización: {p_fecha_cot}, Vencimiento: {p_fecha_venc})")
+            def cargar_datos_cotizacion_callback():
+                cot_sel = st.session_state.get("select_cot_to_fact")
+                if cot_sel and cot_sel != "--- Sin Enlace ---":
+                    row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
+                    st.session_state["doc_empresa"] = str(row_c.get("Empresa", "")).strip().upper()
+                    st.session_state["doc_planta_pdf"] = str(row_c.get("Planta", "")).strip().upper()
+                    st.session_state["doc_grupo_serv"] = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL")).strip().upper()
+                    st.session_state["doc_detalle"] = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
+                    st.session_state["doc_monto_neto"] = int(row_c.get("Monto_Neto", row_c.get("Monto_Total", 0)))
+                    st.session_state["doc_moneda"] = str(row_c.get("Moneda", "CLP")).upper()
+                    
+                    raw_f_cot = row_c.get("Fecha_Emision")
+                    if pd.notna(raw_f_cot) and str(raw_f_cot).strip() not in ["", "None", "NaT"]:
+                        try:
+                            st.session_state["doc_fecha_cot"] = pd.to_datetime(raw_f_cot).date()
+                        except:
+                            st.session_state["doc_fecha_cot"] = date.today()
+                    
+                    raw_f_val = row_c.get("Fecha_Validez")
+                    if pd.notna(raw_f_val) and str(raw_f_val).strip() not in ["", "None", "NaT"]:
+                        try:
+                            st.session_state["doc_fecha_venc"] = pd.to_datetime(raw_f_val).date()
+                        except:
+                            st.session_state["doc_fecha_venc"] = st.session_state["doc_fecha_cot"] + timedelta(days=30)
+
+            cot_seleccionada = st.selectbox(
+                "Seleccionar Cotización para importar datos:",
+                options=["--- Sin Enlace ---"] + cotizaciones_list,
+                key="select_cot_to_fact",
+                on_change=cargar_datos_cotizacion_callback
+            )
+
+            if cot_seleccionada != "--- Sin Enlace ---":
+                st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot']}, Vencimiento: {st.session_state['doc_fecha_venc']})")
 
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
                 with fc1:
-                    n_factura = st.text_input("Número de Factura / Documento", value=p_factura)
-                    n_empresa_ins = st.text_input("Empresa", value=p_empresa)
-                    n_planta_ins = st.text_input("Planta", value=p_planta)
+                    n_factura = st.text_input("Número de Factura / Documento", value=st.session_state["doc_factura"])
+                    n_empresa_ins = st.text_input("Empresa", value=st.session_state["doc_empresa"])
+                    n_planta_ins = st.text_input("Planta", value=st.session_state["doc_planta_pdf"])
                     
                     servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
-                    if p_grupo_serv and p_grupo_serv not in servicios_existentes:
-                        servicios_existentes.append(p_grupo_serv)
+                    p_grp_s = st.session_state["doc_grupo_serv"]
+                    if p_grp_s and p_grp_s not in servicios_existentes:
+                        servicios_existentes.append(p_grp_s)
                         servicios_existentes = sorted(servicios_existentes)
                     
-                    idx_grp_p = servicios_existentes.index(p_grupo_serv) if p_grupo_serv in servicios_existentes else 0
+                    idx_grp_p = servicios_existentes.index(p_grp_s) if p_grp_s in servicios_existentes else 0
                     n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp_p, key="n_grupo_serv_input")
                     
-                    n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", value=p_detalle, key="n_serv_det_input")
+                    n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", value=st.session_state["doc_detalle"], key="n_serv_det_input")
                     
                     m_col1, m_col2 = st.columns([1, 3])
-                    n_moneda = m_col1.selectbox("Moneda", ["CLP", "USD"], index=0 if p_moneda == "CLP" else 1, key="n_moneda_select_fact")
-                    n_monto = m_col2.number_input("Monto Neto", min_value=0, step=100 if n_moneda == "USD" else 1000, value=p_monto)
+                    n_moneda = m_col1.selectbox("Moneda", ["CLP", "USD"], index=0 if st.session_state["doc_moneda"] == "CLP" else 1, key="n_moneda_select_fact")
+                    n_monto = m_col2.number_input("Monto Neto", min_value=0, step=100 if n_moneda == "USD" else 1000, value=st.session_state["doc_monto_neto"])
                     
                     n_dias_prog = st.number_input("Días Programados de Ejecución", min_value=0.0, step=1.0, value=0.0)
                     n_dias_real = st.number_input("Días Reales de Ejecución", min_value=0.0, step=1.0, value=0.0)
@@ -1496,10 +1499,10 @@ if check_password():
                     else:
                         n_f_pago = st.date_input("Fecha de Pago", value=None)
                         
-                    n_f_cot = st.date_input("Fecha Cotización", value=p_fecha_cot)
+                    n_f_cot = st.date_input("Fecha Cotización", value=st.session_state["doc_fecha_cot"])
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
-                    n_f_emi = st.date_input("Fecha Emisión", value=p_fecha_emi)
-                    n_f_venc = st.date_input("Fecha Vencimiento", value=p_fecha_venc)
+                    n_f_emi = st.date_input("Fecha Emisión", value=st.session_state["doc_fecha_emi"])
+                    n_f_venc = st.date_input("Fecha Vencimiento", value=st.session_state["doc_fecha_venc"])
                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
