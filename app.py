@@ -39,7 +39,7 @@ if "active_tab" not in st.session_state:
     st.session_state["active_tab"] = 0
 
 # =============================================================================
-# 1. FUNCIONES DE BACKEND, BASE DE DATOS Y LÓGICA GLOBALES
+# 1. FUNCIONES DE BACKEND, BASE DE DATOS Y LÓGICA GLOBALES (SUPABASE 100%)
 # =============================================================================
 
 @st.cache_resource
@@ -105,7 +105,6 @@ def cargar_datos():
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
             
-    # REGLA ESTRICTA: Año y Mes solo se calculan si Fecha_Pago existe (factura pagada). Si no, son NaN/None (Sin Mes 0).
     df['Año'] = df['Fecha_Pago'].dt.year
     df['Mes'] = df['Fecha_Pago'].dt.month
 
@@ -136,14 +135,13 @@ def eliminar_factura(numero_factura):
         st.error(f"Error al eliminar la factura: {e}")
         return False
 
+@st.cache_data(ttl=30)
 def cargar_contactos():
-    """Consulta los registros de la tabla 'Contactos' en Supabase como fuente primaria para garantizar persistencia."""
+    """Consulta los contactos directamente desde Supabase sin depender de archivos CSV locales."""
     try:
         response = supabase.table("Contactos").select("*").execute()
         if response.data:
             df_c = pd.DataFrame(response.data)
-            
-            # Normalización de columnas recibidas desde Supabase
             col_map = {
                 "nombre": "Nombre",
                 "email": "Correo",
@@ -161,7 +159,6 @@ def cargar_contactos():
                 if col_req not in df_c.columns:
                     df_c[col_req] = ""
 
-            # Sincronización automática con facturas existentes -> Estado "Ganado"
             try:
                 df_facturas_exist = cargar_datos()
                 if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
@@ -172,30 +169,13 @@ def cargar_contactos():
                 pass
 
             return df_c
-    except Exception:
-        pass
-
-    # Fallback local únicamente si falla la conexión a la base de datos de Supabase
-    ARCHIVO_CONTACTOS = "contactos.csv"
-    if os.path.exists(ARCHIVO_CONTACTOS):
-        df_c = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
-        try:
-            df_facturas_exist = cargar_datos()
-            if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
-                empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
-                mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
-                df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
-        except Exception:
-            pass
-        return df_c
+    except Exception as e:
+        st.error(f"Error al cargar contactos desde Supabase: {e}")
 
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
-def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
-    """Inserta o actualiza un contacto en la base de datos de Supabase y en el archivo local."""
-    ARCHIVO_CONTACTOS = "contactos.csv"
-    
-    # Verificación de facturas existentes antes de guardar
+def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
+    """Inserta o actualiza un contacto directamente en Supabase."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -205,48 +185,74 @@ def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", 
     except Exception:
         pass
 
-    nuevo_registro_supa = {
-        "nombre": nombre,
-        "email": email,
-        "estado": estado,
-        "telefono": telefono,
-        "empresa": empresa,
-        "planta": planta,
+    registro_supa = {
+        "nombre": str(nombre).strip(),
+        "email": str(email).strip().lower(),
+        "estado": str(estado).strip(),
+        "telefono": str(telefono).strip(),
+        "empresa": str(empresa).strip().upper(),
+        "planta": str(planta).strip().upper(),
         "valor": int(valor),
-        "rol": rol
+        "rol": str(rol).strip(),
+        "bitacora": str(bitacora)
     }
     
     try:
-        supabase.table("Contactos").upsert(nuevo_registro_supa).execute()
+        supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al guardar contacto en Supabase: {e}")
+
+def eliminar_contacto(email):
+    """Elimina permanentemente un contacto desde Supabase."""
+    try:
+        supabase.table("Contactos").delete().eq("email", str(email).lower()).execute()
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar contacto de Supabase: {e}")
+        return False
+
+# --- GESTIÓN DE INTERACCIONES EN NUBE ---
+@st.cache_data(ttl=30)
+def cargar_interacciones():
+    """Consulta el historial de interacciones directamente desde Supabase."""
+    try:
+        res = supabase.table("interacciones").select("*").execute()
+        if res.data:
+            df_i = pd.DataFrame(res.data)
+            col_m = {
+                "nombre_contacto": "Nombre_Contacto",
+                "empresa": "Empresa",
+                "tipo": "Tipo",
+                "detalle": "Detalle",
+                "fecha": "Fecha"
+            }
+            df_i = df_i.rename(columns={k: v for k, v in col_m.items() if k in df_i.columns})
+            return df_i
     except Exception:
         pass
-        
-    df_cont = cargar_contactos()
-    if not df_cont.empty and 'Correo' in df_cont.columns:
-        df_cont = df_cont[df_cont['Correo'].astype(str).str.lower() != str(email).lower()]
-    elif not df_cont.empty and 'email' in df_cont.columns:
-        df_cont = df_cont[df_cont['email'].astype(str).str.lower() != str(email).lower()]
-        
-    nueva_fila = pd.DataFrame([{
-        "Nombre": nombre,
-        "Empresa": empresa,
-        "Planta": planta,
-        "Correo": email,
-        "Celular": telefono,
-        "Estado": estado,
-        "Valor": int(valor),
-        "Bitacora": "",
-        "Rol_Contacto": rol
-    }])
-    
-    df_cont = pd.concat([df_cont, nueva_fila], ignore_index=True)
-    df_cont.to_csv(ARCHIVO_CONTACTOS, index=False)
+    return pd.DataFrame(columns=["Nombre_Contacto", "Empresa", "Tipo", "Detalle", "Fecha"])
+
+def guardar_interaccion(nombre_contacto, empresa, tipo, detalle):
+    """Guarda una interaccion en la base de datos de Supabase."""
+    dict_i = {
+        "nombre_contacto": str(nombre_contacto).strip(),
+        "empresa": str(empresa).strip().upper(),
+        "tipo": str(tipo).strip(),
+        "detalle": str(detalle).strip(),
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    try:
+        supabase.table("interacciones").insert(dict_i).execute()
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al registrar interacción en la nube: {e}")
 
 # --- GESTIÓN GLOBAL UNIVERSAL DE TICKETS (SUPABASE) ---
-ARCHIVO_TICKETS = "tickets_soporte.csv"
-
+@st.cache_data(ttl=30)
 def cargar_tickets():
-    """Carga tickets de soporte desde Supabase (visibilidad universal para todos los usuarios) con fallback local."""
+    """Carga tickets de soporte exclusivamente desde Supabase."""
     try:
         res = supabase.table("tickets").select("*").execute()
         if res.data:
@@ -266,20 +272,13 @@ def cargar_tickets():
                 if c_req not in df_t.columns:
                     df_t[c_req] = ""
             return df_t
-    except Exception:
-        pass
-
-    if os.path.exists(ARCHIVO_TICKETS):
-        return pd.read_csv(ARCHIVO_TICKETS)
+    except Exception as e:
+        st.error(f"Error al obtener tickets desde la nube: {e}")
 
     return pd.DataFrame(columns=["ID_Ticket", "Empresa", "Contacto", "Asunto", "Estado", "Prioridad", "Fecha", "Creado_Por"])
 
 def guardar_ticket(dict_ticket):
-    """Guarda o actualiza un ticket en Supabase y localmente."""
-    df_t = cargar_tickets()
-    df_t = pd.concat([df_t[df_t['ID_Ticket'].astype(str) != str(dict_ticket['ID_Ticket'])], pd.DataFrame([dict_ticket])], ignore_index=True)
-    df_t.to_csv(ARCHIVO_TICKETS, index=False)
-
+    """Guarda o actualiza un ticket en Supabase."""
     supa_dict = {
         "id_ticket": str(dict_ticket.get("ID_Ticket", "")),
         "empresa": str(dict_ticket.get("Empresa", "")),
@@ -291,36 +290,30 @@ def guardar_ticket(dict_ticket):
         "creado_por": str(dict_ticket.get("Creado_Por", ""))
     }
     try:
-        supabase.table("tickets").upsert(supa_dict).execute()
-    except Exception:
-        pass
+        supabase.table("tickets").upsert(supa_dict, on_conflict="id_ticket").execute()
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al guardar ticket en Supabase: {e}")
 
 def eliminar_ticket(id_ticket):
-    """Elimina un ticket en Supabase y localmente."""
-    df_t = cargar_tickets()
-    if not df_t.empty:
-        df_t = df_t[df_t['ID_Ticket'].astype(str) != str(id_ticket)]
-        df_t.to_csv(ARCHIVO_TICKETS, index=False)
+    """Elimina un ticket en Supabase."""
     try:
         supabase.table("tickets").delete().eq("id_ticket", str(id_ticket)).execute()
-    except Exception:
-        pass
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al eliminar ticket de Supabase: {e}")
 
-# --- GESTIÓN DE COTIZACIONES ---
-ARCHIVO_COTIZACIONES = "cotizaciones.csv"
-
+# --- GESTIÓN DE COTIZACIONES (SUPABASE) ---
+@st.cache_data(ttl=30)
 def cargar_cotizaciones():
-    """Carga cotizaciones desde Supabase o fallback a CSV local."""
+    """Carga cotizaciones directamente desde Supabase."""
     df_c = pd.DataFrame()
     try:
         res = supabase.table("cotizaciones").select("*").execute()
         if res.data:
             df_c = pd.DataFrame(res.data)
-    except Exception:
-        pass
-    
-    if df_c.empty and os.path.exists(ARCHIVO_COTIZACIONES):
-        df_c = pd.read_csv(ARCHIVO_COTIZACIONES)
+    except Exception as e:
+        st.error(f"Error al consultar cotizaciones: {e}")
         
     if df_c.empty:
         cols = [
@@ -344,16 +337,12 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y archivo local, y registra automáticamente el contacto."""
-    df_cot = cargar_cotizaciones()
-    nueva_cot = pd.DataFrame([dict_cot])
-    df_cot = pd.concat([df_cot[df_cot['Folio'].astype(str) != str(dict_cot['Folio'])], nueva_cot], ignore_index=True)
-    df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
-    
+    """Guarda o actualiza cotización en Supabase y sincroniza el contacto en la nube."""
     try:
-        supabase.table("cotizaciones").upsert(dict_cot).execute()
-    except Exception:
-        pass
+        supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al guardar cotización en Supabase: {e}")
         
     nom_c = dict_cot.get("Contacto", "").strip()
     em_c = dict_cot.get("Email_Contacto", "").strip()
@@ -374,21 +363,19 @@ def guardar_cotizacion(dict_cot):
         )
 
 def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
-    """Actualiza el estado de una cotización y su contacto a GANADO cuando se enlaza a una factura."""
+    """Actualiza el estado de una cotización y su contacto a GANADO en Supabase."""
     if not folio_cot or folio_cot == "--- Sin Enlace ---":
         return
     try:
         supabase.table("cotizaciones").update({"Estado": "GANADO"}).eq("Folio", str(folio_cot)).execute()
-    except Exception:
-        pass
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al actualizar estado de cotización: {e}")
         
     df_cot = cargar_cotizaciones()
     if not df_cot.empty and 'Folio' in df_cot.columns:
         idx_c = df_cot[df_cot['Folio'].astype(str) == str(folio_cot)].index
         if not idx_c.empty:
-            df_cot.loc[idx_c, 'Estado'] = 'GANADO'
-            df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
-            
             row_c = df_cot.loc[idx_c[0]]
             nom_c = str(row_c.get("Contacto", "")).strip()
             em_c = str(row_c.get("Email_Contacto", "")).strip()
@@ -407,15 +394,12 @@ def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
                 )
 
 def eliminar_cotizacion(folio_cot):
-    """Elimina una cotización en Supabase y en el archivo local CSV."""
-    df_cot = cargar_cotizaciones()
-    if not df_cot.empty:
-        df_cot = df_cot[df_cot['Folio'].astype(str) != str(folio_cot)]
-        df_cot.to_csv(ARCHIVO_COTIZACIONES, index=False)
+    """Elimina una cotización directamente desde Supabase."""
     try:
         supabase.table("cotizaciones").delete().eq("Folio", str(folio_cot)).execute()
-    except Exception:
-        pass
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error al eliminar cotización de Supabase: {e}")
 
 def obtener_consejo_ia(notas_bitacora):
     return (
@@ -637,14 +621,9 @@ def generar_pdf(df_original):
 # 2. BLOQUE PRINCIPAL E INTERFAZ DE USUARIO CON STREAMLIT
 # =============================================================================
 if check_password():
-    ARCHIVO_CONTACTOS = "contactos.csv"
-    ARCHIVO_HISTORIAL_INTERACCIONES = "historial_interacciones.csv"
 
     df_tickets = cargar_tickets()
-
-    if not os.path.exists(ARCHIVO_HISTORIAL_INTERACCIONES):
-        pd.DataFrame(columns=["Nombre_Contacto", "Empresa", "Tipo", "Detalle", "Fecha"]).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
-    df_interacciones = pd.read_csv(ARCHIVO_HISTORIAL_INTERACCIONES)
+    df_interacciones = cargar_interacciones()
 
     if "log_actividad" not in st.session_state:
         st.session_state["log_actividad"] = []
@@ -677,7 +656,6 @@ if check_password():
     df_contactos = cargar_contactos()
     if 'Rol_Contacto' not in df_contactos.columns:
         df_contactos['Rol_Contacto'] = 'Influenciador'
-        df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
 
     df = cargar_datos()
     df_cotizaciones = cargar_cotizaciones()
@@ -1058,7 +1036,6 @@ if check_password():
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
 
-        # --- LECTURA E IMPORTACIÓN DINÁMICA DE COTIZACIÓN PDF ---
         p_pdf_folio = f"137{len(df_cotizaciones)+7}"
         p_pdf_empresa = ""
         p_pdf_rut = ""
@@ -1104,23 +1081,19 @@ if check_password():
                         if texto_extraido:
                             import re
                             
-                            # Moneda
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_extraido, re.IGNORECASE):
                                 p_pdf_moneda = "USD"
                             else:
                                 p_pdf_moneda = "CLP"
 
-                            # 1. Folio
                             m_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
                             if m_folio:
                                 p_pdf_folio = m_folio.group(1).strip()
 
-                            # 2. RUT
                             m_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
                             if m_rut:
                                 p_pdf_rut = m_rut.group(1).strip()
 
-                            # 3. Extraer Fechas Dinámicamente desde el PDF
                             m_f_emi = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n|Fecha)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_emi:
                                 try:
@@ -1139,7 +1112,6 @@ if check_password():
                             else:
                                 p_pdf_fecha_val = p_pdf_fecha_emi + timedelta(days=15)
 
-                            # 4. Monto Neto
                             m_neto = re.search(r'(?:Neto|Subtotal|Sub-Total)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
                             if m_neto:
                                 try:
@@ -1148,7 +1120,6 @@ if check_password():
                                 except:
                                     pass
 
-                            # 5. Emails
                             emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
                             for em in emails:
                                 if "itelcam" in em.lower():
@@ -1156,14 +1127,12 @@ if check_password():
                                 elif not p_pdf_email_cont:
                                     p_pdf_email_cont = em
 
-                            # 6. Teléfonos
                             fonos = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
                             if len(fonos) >= 1:
                                 p_pdf_fono_ejec = fonos[0].replace(" ", "")
                             if len(fonos) >= 2:
                                 p_pdf_fono_cont = fonos[1].replace(" ", "")
 
-                            # 7. Escaneo por Expresiones Avanzadas Multilínea (Empresa, Contacto, Ejecutivo, Planta)
                             m_emp = re.search(r'(?:Señores|Señor(?:es)?|Empresa|Raz[oó]n Social|Cliente)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
                             if m_emp:
                                 val_e = m_emp.group(1).strip()
@@ -1192,7 +1161,6 @@ if check_password():
                                 if len(val_p) > 2:
                                     p_pdf_planta = val_p.upper()
 
-                            # 8. Deducción inteligente de Empresa por Correo
                             if not p_pdf_empresa and p_pdf_email_cont:
                                 dom = p_pdf_email_cont.split("@")[-1].lower()
                                 if "arcor" in dom or "dosenuno" in dom:
@@ -1202,7 +1170,6 @@ if check_password():
                                 elif "cmpc" in dom:
                                     p_pdf_empresa = "CMPC"
 
-                            # 9. Extraer Glosa Completa
                             m_glosa = re.search(r'(?:Glosa|Descripci[oó]n|Trabajo a realizar)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,3})', texto_extraido, re.IGNORECASE)
                             if m_glosa:
                                 p_pdf_glosa = m_glosa.group(1).strip()
@@ -1213,12 +1180,8 @@ if check_password():
                     except Exception as e:
                         st.error(f"Error al leer el archivo PDF: {e}")
 
-        # =====================================================================
-        # FORMULARIO CON SELECCIÓN/CREACIÓN DE CONTACTOS PARA COTIZACIÓN MANUAL
-        # =====================================================================
         with st.expander("➕ Generar Nueva Cotización (Manual o Autocompletada)", expanded=True):
             
-            # Construir lista de contactos existentes para vincular
             contactos_opciones = ["➕ Crear/Ingresar Nuevo Contacto"]
             if not df_contactos.empty:
                 for _, r_cont in df_contactos.iterrows():
@@ -1233,7 +1196,6 @@ if check_password():
                 key="select_contacto_cotizacion_manual"
             )
 
-            # Extraer valores sugeridos del contacto seleccionado
             sug_nombre = p_pdf_contacto
             sug_email = p_pdf_email_cont
             sug_fono = p_pdf_fono_cont
@@ -1330,15 +1292,11 @@ if check_password():
                             "Estado": "PENDIENTE"
                         }
                         guardar_cotizacion(dict_guardar)
-                        st.cache_data.clear()
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente y contacto sincronizado en el CRM!")
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente y contacto sincronizado en la nube!")
                         st.rerun()
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
 
-        # =====================================================================
-        # APARTADO EDITAR COTIZACIÓN EXISTENTE
-        # =====================================================================
         with st.expander("✏ Editar Cotización Existente"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
                 folios_cot_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
@@ -1429,15 +1387,11 @@ if check_password():
                                 "Estado": ec_estado
                             }
                             guardar_cotizacion(dict_editado)
-                            st.cache_data.clear()
                             st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente!")
                             st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para editar.")
 
-        # =====================================================================
-        # APARTADO ELIMINAR COTIZACIÓN
-        # =====================================================================
         with st.expander("🗑 Eliminar Cotización"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
                 folios_del_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
@@ -1449,8 +1403,7 @@ if check_password():
                     
                     if st.button(f"🔥 Confirmar y Eliminar Cotización #{folio_cot_del}", key="btn_confirm_del_cot"):
                         eliminar_cotizacion(folio_cot_del)
-                        st.cache_data.clear()
-                        st.success(f"Cotización Folio #{folio_cot_del} eliminada con éxito de Supabase y el sistema local.")
+                        st.success(f"Cotización Folio #{folio_cot_del} eliminada con éxito de Supabase.")
                         st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para eliminar.")
@@ -1480,7 +1433,6 @@ if check_password():
     with tab4:
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
-        # Variables temporales persistentes en Session State para auto-completar el formulario
         if "doc_factura" not in st.session_state:
             st.session_state["doc_factura"] = ""
         if "doc_empresa" not in st.session_state:
@@ -1502,16 +1454,12 @@ if check_password():
         if "doc_detalle" not in st.session_state:
             st.session_state["doc_detalle"] = ""
 
-        # Palabras clave estándar para detección automática de servicio por planta / grupo
         PALABRAS_CLAVE_SERVICIOS = [
             "MANTENIMIENTO", "MONITOREO", "MANTENCION", "REPARACION", "INSTALACION",
             "CONFIGURACION", "CABLEADO", "FIBRA OPTICA", "CAMARAS", "CCTV", "CONTROL DE ACCESO",
             "SOPORTE", "PROYECTO", "OBRA", "SUMINISTRO", "INSPECCION", "MONTAJE", "REDES"
         ]
 
-        # =====================================================================
-        # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS PDF FACTURA
-        # =====================================================================
         with st.expander("📄 Cargar e Importar Factura desde Archivo PDF", expanded=False):
             st.write("Sube el PDF de una factura recibida o emitida para extraer automáticamente sus datos. *(No almacena el archivo)*")
             archivo_pdf_fact = st.file_uploader("Seleccionar archivo PDF Factura", type=["pdf"], key="uploader_pdf_factura")
@@ -1545,25 +1493,21 @@ if check_password():
                                 'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
                             }
 
-                            # 1. Moneda
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_fact_pdf, re.IGNORECASE):
                                 st.session_state["doc_moneda"] = "USD"
                             else:
                                 st.session_state["doc_moneda"] = "CLP"
 
-                            # 2. Número de Factura (Ej: Nº343 o N° 343)
                             m_fact = re.search(r'(?:FACTURA\s*ELECTR[OÓ]NICA\s*)?N[º°]\s*(\d+)', texto_fact_pdf, re.IGNORECASE)
                             if m_fact:
                                 st.session_state["doc_factura"] = m_fact.group(1).strip()
 
-                            # 3. Empresa / Cliente (Ej: SEÑOR(ES): MONSANTO CHILE S.A.)
                             m_emp_f = re.search(r'SEÑOR\(ES\)\s*:\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_emp_f:
                                 val_ef = m_emp_f.group(1).strip()
                                 val_ef = re.split(r'\b(?:RUT|R\.U\.T|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
                                 st.session_state["doc_empresa"] = val_ef.upper()
 
-                            # 4. Fecha de Emisión (Texto: 24 de Septiembre del 2026)
                             m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_fact_pdf, re.IGNORECASE)
                             if m_f_emi_txt:
                                 dia_e = int(m_f_emi_txt.group(1))
@@ -1572,7 +1516,6 @@ if check_password():
                                 mes_e = meses_es.get(mes_e_str, 1)
                                 st.session_state["doc_fecha_emi"] = date(anio_e, mes_e, dia_e)
 
-                            # 5. Fecha de Vencimiento (Desde sección de Pagos: 2026-10-30 $1.186.199 Pago total)
                             m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
                             if m_f_venc_pago:
                                 try:
@@ -1580,12 +1523,10 @@ if check_password():
                                 except:
                                     pass
 
-                            # 6. Planta (Ej: "Planta Viluco")
                             m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\áéíóúÁÉÍÓÚñÑ]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_planta_pdf:
                                 st.session_state["doc_planta_pdf"] = m_planta_pdf.group(1).strip().upper()
 
-                            # 7. Monto Neto (Ej: MONTO NETO $ 996.806)
                             m_neto_f = re.search(r'MONTO\s*NETO\s*\$?\s*([\d\.\,]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_neto_f:
                                 try:
@@ -1594,7 +1535,6 @@ if check_password():
                                 except:
                                     pass
 
-                            # 8. Detalle del Servicio (Extraer detalle descriptivo sin sobrescribir si ya existe)
                             lineas_pdf = [l.strip() for l in texto_fact_pdf.split('\n') if l.strip()]
                             det_lineas = []
                             capturando = False
@@ -1626,9 +1566,6 @@ if check_password():
                     except Exception as e:
                         st.error(f"Error al leer el archivo PDF de la factura: {e}")
 
-        # =====================================================================
-        # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS XML
-        # =====================================================================
         with st.expander("📄 Cargar Importar Factura desde Archivo XML (DTE)", expanded=False):
             st.write("Sube el archivo XML del Documento Tributario Electrónico (DTE) emitido o recibido para registrar la factura. *(No almacena el archivo en servidor/nube)*")
             archivo_xml = st.file_uploader("Seleccionar archivo XML DTE", type=["xml"], key="uploader_xml_factura")
@@ -1701,9 +1638,6 @@ if check_password():
 
         st.divider()
 
-        # =====================================================================
-        # CREACIÓN DE FACTURA (VINCULADA A COTIZACIONES EXISTENTES, PDF O XML)
-        # =====================================================================
         with st.expander("➕ Crear Nueva Factura / Registro de Ingreso", expanded=True):
             st.markdown("### 🔗 Enlazar desde Cotización Existente (Opcional)")
             cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
@@ -1787,7 +1721,6 @@ if check_password():
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
                         fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
                         
-                        # AÑO Y MES SOLO SI EXISTE FECHA DE PAGO (SIN MES 0)
                         if pd.notna(fecha_pago_final):
                             anio_val = int(fecha_pago_final.year)
                             mes_val = int(fecha_pago_final.month)
@@ -1818,9 +1751,8 @@ if check_password():
                         }
                         
                         try:
-                            supabase.table("ingresos").upsert(nuevo_registro_supa).execute()
+                            supabase.table("ingresos").upsert(nuevo_registro_supa, on_conflict="Factura").execute()
                             
-                            # Actualización automática: Marca la cotización enlazada como GANADA y actualiza el contacto
                             if cot_seleccionada != "--- Sin Enlace ---":
                                 marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
                             else:
@@ -1834,7 +1766,6 @@ if check_password():
                                     rol="Finanzas / Compras"
                                 )
                             
-                            st.cache_data.clear()
                             st.success(f"¡Factura #{n_factura} guardada y sincronizada exitosamente!")
                             st.rerun()
                         except Exception as e:
@@ -1842,9 +1773,6 @@ if check_password():
                     else:
                         st.warning("Por lo menos debes rellenar el Número de Factura y la Empresa.")
 
-        # =====================================================================
-        # APARTADO PARA EDITAR FACTURAS EXISTENTES
-        # =====================================================================
         with st.expander("✏ Editar Factura Existente (Todas las Secciones)"):
             if not df.empty and 'Factura' in df.columns:
                 facturas_list = sorted(df['Factura'].astype(str).unique().tolist())
@@ -1921,7 +1849,6 @@ if check_password():
                             f_ges_final = str(e_f_ges) if e_f_ges else safe_date_str(row_edit.get('Fecha_GES'))
                             f_pago_final = str(e_f_pago) if e_f_pago else safe_date_str(row_edit.get('Fecha_Pago'))
 
-                            # AÑO Y MES SOLO SI EXISTE FECHA DE PAGO (SIN MES 0)
                             if f_pago_final and pd.notna(pd.to_datetime(f_pago_final, errors='coerce')):
                                 dt_p = pd.to_datetime(f_pago_final)
                                 anio_val = int(dt_p.year)
@@ -1952,7 +1879,6 @@ if check_password():
 
                             try:
                                 supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
-                                st.cache_data.clear()
                                 st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
                                 st.rerun()
                             except Exception as e:
@@ -1960,9 +1886,6 @@ if check_password():
             else:
                 st.info("No hay facturas registradas para editar.")
 
-        # =====================================================================
-        # APARTADO ELIMINAR FACTURA
-        # =====================================================================
         with st.expander("🗑 Eliminar Factura"):
             if not df.empty and 'Factura' in df.columns:
                 facturas_del_list = sorted(df['Factura'].astype(str).unique().tolist())
@@ -1974,7 +1897,6 @@ if check_password():
                     
                     if st.button(f"🔥 Confirmar y Eliminar Factura #{factura_a_eliminar}", key="btn_confirm_del_factura"):
                         if eliminar_factura(factura_a_eliminar):
-                            st.cache_data.clear()
                             st.success(f"Factura #{factura_a_eliminar} eliminada exitosamente de Supabase.")
                             st.rerun()
             else:
@@ -1987,9 +1909,6 @@ if check_password():
         else:
             df['Semáforo'] = 'Sin Fecha Vencimiento'
 
-        # =====================================================================
-        # ÚNICO HISTORIAL GENERAL Y MENÚ DESPLEGABLE DE DETALLE
-        # =====================================================================
         st.subheader("📊 Historial General de Facturas")
           
         df['Estado'] = df['Fecha_Pago'].apply(lambda x: 'Pagado' if pd.notna(x) else 'PENDIENTE')
@@ -2083,13 +2002,12 @@ if check_password():
                         supabase.table("ingresos").update({"Estado": nuevo_est}).eq("Factura", fac_num).execute()
                     except Exception as e:
                         st.error(f"Error al actualizar factura {fac_num}: {e}")
-                st.cache_data.clear()
                 st.success("¡Estados actualizados exitosamente en Supabase!")
                 st.session_state["active_tab"] = 4
                 st.rerun()
 
         st.divider()
-          
+
     # =========================================================================
     # SECCIÓN: EMBUDO DE VENTAS Y MÓDULO UNIVERSAL DE SOPORTE Y TICKETS
     # =========================================================================
@@ -2100,10 +2018,7 @@ if check_password():
             df_contactos['Bitacora'] = ""
 
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
-       
-        # =====================================================================
-        # PANEL DE KPIS COMERCIALES
-        # =====================================================================
+
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
           
         total_contactos = len(df_contactos)
@@ -2164,7 +2079,7 @@ if check_password():
                 if submitted:
                     if nombre and correo and empresa:
                         guardar_contacto(nombre, correo, estado, celular, empresa, planta, valor, rol)
-                        st.success(f"¡Cliente {nombre} registrado exitosamente!")
+                        st.success(f"¡Cliente {nombre} registrado exitosamente en la nube!")
                         st.session_state["active_tab"] = 5
                         st.rerun()
                     else:
@@ -2185,7 +2100,6 @@ if check_password():
         st.plotly_chart(fig_funnel, use_container_width=True)
         st.divider()
 
-        # TABLERO KANBAN CON EDICIÓN DIRECTA EN TARJETA
         st.subheader("📌 Tablero de Contactos por Etapa del Embudo (Edición Directa)")
         cols = st.columns(5)
        
@@ -2226,7 +2140,6 @@ if check_password():
                     else:
                         st.caption("⚠ Sin correo registrado")
 
-                    # MODAL / EXPANDER DE EDICIÓN RÁPIDA EN LA MISMA TARJETA
                     with st.expander(f"✏️ Editar Tarjeta ({row.get('Nombre', 'Contacto')})"):
                         with st.form(f"form_quick_edit_card_{idx}"):
                             qe_nombre = st.text_input("Nombre", value=str(row.get('Nombre', '')))
@@ -2254,9 +2167,10 @@ if check_password():
                                     empresa=qe_empresa,
                                     planta=qe_planta,
                                     valor=qe_valor,
-                                    rol=qe_rol
+                                    rol=qe_rol,
+                                    bitacora=str(row.get('Bitacora', ''))
                                 )
-                                st.success("¡Tarjeta actualizada!")
+                                st.success("¡Tarjeta actualizada en la nube!")
                                 st.session_state["active_tab"] = 5
                                 st.rerun()
 
@@ -2278,15 +2192,13 @@ if check_password():
                            
                             if st.form_submit_button("➕ Añadir a Línea de Tiempo"):
                                 if detalle_inter.strip() != "":
-                                    nueva_interaccion = pd.DataFrame([{
-                                        "Nombre_Contacto": row['Nombre'],
-                                        "Empresa": row['Empresa'],
-                                        "Tipo": tipo_inter,
-                                        "Detalle": detalle_inter,
-                                        "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                                    }])
-                                    pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
-                                    st.success("¡Interacción registrada!")
+                                    guardar_interaccion(
+                                        nombre_contacto=row['Nombre'],
+                                        empresa=row['Empresa'],
+                                        tipo=tipo_inter,
+                                        detalle=detalle_inter
+                                    )
+                                    st.success("¡Interacción registrada en la nube!")
                                     st.rerun()
                                 else:
                                     st.warning("Escribe un detalle para la interacción.")
@@ -2303,28 +2215,42 @@ if check_password():
                         col_b1, col_b2 = st.columns(2)
                         with col_b1:
                             if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
-                                df_contactos.loc[idx, 'Bitacora'] = nueva_nota
-                                df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
-                               
-                                nueva_interaccion = pd.DataFrame([{
-                                    "Nombre_Contacto": row['Nombre'],
-                                    "Empresa": row['Empresa'],
-                                    "Tipo": "Nota / Bitácora",
-                                    "Detalle": nueva_nota[:80] + "...",
-                                    "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                                }])
-                                pd.concat([df_interacciones, nueva_interaccion], ignore_index=True).to_csv(ARCHIVO_HISTORIAL_INTERACCIONES, index=False)
-                               
-                                st.success("¡Guardado!")
+                                guardar_contacto(
+                                    nombre=row['Nombre'],
+                                    email=correo_contacto,
+                                    estado=row['Estado'],
+                                    telefono=row.get('Celular', ''),
+                                    empresa=row.get('Empresa', ''),
+                                    planta=row.get('Planta', ''),
+                                    valor=row.get('Valor', 0),
+                                    rol=row.get('Rol_Contacto', 'Influenciador'),
+                                    bitacora=nueva_nota
+                                )
+                                guardar_interaccion(
+                                    nombre_contacto=row['Nombre'],
+                                    empresa=row['Empresa'],
+                                    tipo="Nota / Bitácora",
+                                    detalle=nueva_nota[:80] + "..."
+                                )
+                                st.success("¡Bitácora sincronizada en Supabase!")
                                 st.rerun()
                         with col_b2:
                             nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
                             if nuevo_estado_rapido != row['Estado']:
-                                df_contactos.loc[idx, 'Estado'] = nuevo_estado_rapido
-                                df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
+                                guardar_contacto(
+                                    nombre=row['Nombre'],
+                                    email=correo_contacto,
+                                    estado=nuevo_estado_rapido,
+                                    telefono=row.get('Celular', ''),
+                                    empresa=row.get('Empresa', ''),
+                                    planta=row.get('Planta', ''),
+                                    valor=row.get('Valor', 0),
+                                    rol=row.get('Rol_Contacto', 'Influenciador'),
+                                    bitacora=nota_actual
+                                )
                                 st.rerun()
 
-                    with st.expander(f"⏱️️ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
+                    with st.expander(f"⏱ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
                         filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row.get('Nombre')]
                         if not filtro_inter.empty:
                             for _, inter_row in filtro_inter.iterrows():
@@ -2333,7 +2259,7 @@ if check_password():
                             st.caption("No hay interacciones registradas aún.")
 
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
-                        df_contactos.drop(idx).to_csv(ARCHIVO_CONTACTOS, index=False)
+                        eliminar_contacto(correo_contacto)
                         st.session_state["active_tab"] = 5
                         st.rerun()
 
@@ -2450,7 +2376,6 @@ if check_password():
         # =====================================================================
         st.subheader("🛠️ Módulo Universal de Soporte y Tickets (Helpdesk)")
         
-        # Preparar opciones de contactos para vinculación
         lista_contactos_opciones = ["--- Sin Contacto Específico ---"]
         if not df_contactos.empty:
             for _, r_cont in df_contactos.iterrows():
@@ -2459,7 +2384,6 @@ if check_password():
                 if n_c or e_c:
                     lista_contactos_opciones.append(f"{n_c} ({e_c})")
 
-        # 1. CREAR TICKET
         with st.expander("➕ Crear Nuevo Ticket de Soporte", expanded=False):
             with st.form("form_ticket_universal", clear_on_submit=True):
                 col_tk1, col_tk2 = st.columns(2)
@@ -2492,13 +2416,11 @@ if check_password():
                         }
                         
                         guardar_ticket(dict_tk)
-                        st.cache_data.clear()
                         st.success(f"¡Ticket #{nuevo_id} registrado y publicado globalmente!")
                         st.rerun()
                     else:
                         st.warning("Escribe un asunto para el ticket.")
 
-        # 2. EDITAR TICKET EXISTENTE
         with st.expander("✏️ Editar Ticket Existente", expanded=False):
             if not df_tickets.empty and 'ID_Ticket' in df_tickets.columns:
                 lista_ids_tk = sorted(df_tickets['ID_Ticket'].astype(str).unique().tolist())
@@ -2547,13 +2469,11 @@ if check_password():
                                 "Creado_Por": str(row_tk_edit.get('Creado_Por', 'Sistema'))
                             }
                             guardar_ticket(dict_tk_edit)
-                            st.cache_data.clear()
                             st.success(f"¡Ticket #{id_tk_editar} actualizado exitosamente!")
                             st.rerun()
             else:
                 st.info("No hay tickets registrados para editar.")
 
-        # 3. ELIMINAR TICKET
         with st.expander("🗑️ Eliminar Ticket de Soporte", expanded=False):
             if not df_tickets.empty and 'ID_Ticket' in df_tickets.columns:
                 lista_del_tk = sorted(df_tickets['ID_Ticket'].astype(str).unique().tolist())
@@ -2563,7 +2483,6 @@ if check_password():
                     st.warning(f"⚠️ ¿Eliminar permanentemente el Ticket **#{id_tk_del}** ({row_tk_d.get('Asunto', 'N/A')})?")
                     if st.button(f"🔥 Confirmar y Eliminar Ticket #{id_tk_del}", key="btn_confirm_del_tk"):
                         eliminar_ticket(id_tk_del)
-                        st.cache_data.clear()
                         st.success(f"Ticket #{id_tk_del} eliminado correctamente.")
                         st.rerun()
             else:
@@ -2597,16 +2516,17 @@ if check_password():
                     n_valor = st.number_input("Valor", value=int(row['Valor']) if pd.notna(row['Valor']) else 0, min_value=0, step=1000)
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
-                        df_contactos.loc[idx, 'Nombre'] = n_nombre
-                        df_contactos.loc[idx, 'Empresa'] = n_empresa
-                        df_contactos.loc[idx, 'Planta'] = n_planta
-                        df_contactos.loc[idx, 'Correo'] = n_correo
-                        df_contactos.loc[idx, 'Celular'] = n_celular
-                        df_contactos.loc[idx, 'Estado'] = n_estado
-                        df_contactos.loc[idx, 'Valor'] = int(n_valor)
-                        df_contactos.loc[idx, 'Rol_Contacto'] = n_rol
-                       
-                        df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
-                        st.success("¡Contacto actualizado con éxito!")
+                        guardar_contacto(
+                            nombre=n_nombre,
+                            email=n_correo,
+                            estado=n_estado,
+                            telefono=n_celular,
+                            empresa=n_empresa,
+                            planta=n_planta,
+                            valor=n_valor,
+                            rol=n_rol,
+                            bitacora=str(row.get('Bitacora', ''))
+                        )
+                        st.success("¡Contacto actualizado con éxito en Supabase!")
                         st.session_state["active_tab"] = 5
                         st.rerun()
