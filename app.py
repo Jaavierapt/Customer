@@ -1078,7 +1078,7 @@ if check_password():
         # =====================================================================
         # APARTADO EDITAR COTIZACIÓN EXISTENTE
         # =====================================================================
-        with st.expander("✏️️ Editar Cotización Existente"):
+        with st.expander("✏ Editar Cotización Existente"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
                 folios_cot_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
                 folio_cot_editar = st.selectbox("Selecciona el Folio de Cotización a Editar:", folios_cot_list, key="select_cot_edit")
@@ -1177,7 +1177,7 @@ if check_password():
         # =====================================================================
         # APARTADO ELIMINAR COTIZACIÓN
         # =====================================================================
-        with st.expander("🗑️️ Eliminar Cotización"):
+        with st.expander("🗑 Eliminar Cotización"):
             if not df_cotizaciones.empty and 'Folio' in df_cotizaciones.columns:
                 folios_del_list = sorted(df_cotizaciones['Folio'].astype(str).unique().tolist())
                 folio_cot_del = st.selectbox("Selecciona el Folio de Cotización a Eliminar:", folios_del_list, key="select_cot_del")
@@ -1219,15 +1219,23 @@ if check_password():
     with tab4:
         st.header("➕ Gestión de Facturas y Ciclo de Pago")
 
-        # Variables temporales para auto-completar desde PDF o XML
-        doc_factura = ""
-        doc_empresa = ""
-        doc_planta_pdf = ""
-        doc_monto_neto = 0
-        doc_moneda = "CLP"
-        doc_fecha_emi = None
-        doc_fecha_venc = None
-        doc_detalle = ""
+        # Variables temporales persistentes en Session State para auto-completar el formulario
+        if "doc_factura" not in st.session_state:
+            st.session_state["doc_factura"] = ""
+        if "doc_empresa" not in st.session_state:
+            st.session_state["doc_empresa"] = ""
+        if "doc_planta_pdf" not in st.session_state:
+            st.session_state["doc_planta_pdf"] = ""
+        if "doc_monto_neto" not in st.session_state:
+            st.session_state["doc_monto_neto"] = 0
+        if "doc_moneda" not in st.session_state:
+            st.session_state["doc_moneda"] = "CLP"
+        if "doc_fecha_emi" not in st.session_state:
+            st.session_state["doc_fecha_emi"] = date.today()
+        if "doc_fecha_venc" not in st.session_state:
+            st.session_state["doc_fecha_venc"] = date.today() + timedelta(days=30)
+        if "doc_detalle" not in st.session_state:
+            st.session_state["doc_detalle"] = ""
 
         # =====================================================================
         # MÓDULO DE LECTURA E IMPORTACIÓN AUTOMÁTICA DE ARCHIVOS PDF FACTURA
@@ -1238,7 +1246,7 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
@@ -1247,7 +1255,7 @@ if check_password():
                         if PDF_READER_TYPE == "pdfplumber":
                             with pdfplumber.open(pdf_stream_f) as pdf_doc_f:
                                 for page in pdf_doc_f.pages:
-                                    txt_p = page.extract_text(layout=False)
+                                    txt_p = page.extract_text()
                                     if txt_p:
                                         texto_fact_pdf += txt_p + "\n"
                         elif PDF_READER_TYPE in ["pypdf", "pypdf2"]:
@@ -1265,73 +1273,74 @@ if check_password():
                                 'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
                             }
 
-                            texto_limpio = " ".join(texto_fact_pdf.split())
-
                             # 1. Moneda
-                            if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_limpio, re.IGNORECASE):
-                                doc_moneda = "USD"
+                            if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_fact_pdf, re.IGNORECASE):
+                                st.session_state["doc_moneda"] = "USD"
                             else:
-                                doc_moneda = "CLP"
+                                st.session_state["doc_moneda"] = "CLP"
 
-                            # 2. Número de Factura
-                            m_fact = re.search(r'(?:FACTURA\s*ELECTR[OÓ]NICA|N[°º]|Folio)\s*N[°º]?\s*(\d+)', texto_limpio, re.IGNORECASE)
+                            # 2. Número de Factura (Ej: Nº343 o N° 343)
+                            m_fact = re.search(r'(?:FACTURA\s*ELECTR[OÓ]NICA\s*)?N[º°]\s*(\d+)', texto_fact_pdf, re.IGNORECASE)
                             if m_fact:
-                                doc_factura = m_fact.group(1).strip()
+                                st.session_state["doc_factura"] = m_fact.group(1).strip()
 
-                            # 3. Empresa / Cliente
-                            m_emp_f = re.search(r'SEÑOR\(ES\)\s*:\s*([^\n]+?)(?=\s*R\.?U\.?T|GIRO|DIRECCION|$)', texto_fact_pdf, re.IGNORECASE)
+                            # 3. Empresa / Cliente (Ej: SEÑOR(ES): MONSANTO CHILE S.A.)
+                            m_emp_f = re.search(r'SEÑOR\(ES\)\s*:\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_emp_f:
-                                doc_empresa = m_emp_f.group(1).strip().upper()
-                            else:
-                                m_emp_alt = re.search(r'(?:Señor\(es\)|Empresa|Cliente)\s*[:#]?\s*([^\n]+)', texto_fact_pdf, re.IGNORECASE)
-                                if m_emp_alt:
-                                    doc_empresa = m_emp_alt.group(1).strip().upper()
+                                val_ef = m_emp_f.group(1).strip()
+                                val_ef = re.split(r'\b(?:RUT|R\.U\.T|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
+                                st.session_state["doc_empresa"] = val_ef.upper()
 
-                            # 4. Fecha de Emisión (Texto: 24 de Septiembre del 2026 O Numérica)
-                            m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_limpio, re.IGNORECASE)
+                            # 4. Fecha de Emisión (Texto: 24 de Septiembre del 2026)
+                            m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_fact_pdf, re.IGNORECASE)
                             if m_f_emi_txt:
                                 dia_e = int(m_f_emi_txt.group(1))
                                 mes_e_str = m_f_emi_txt.group(2).lower()
                                 anio_e = int(m_f_emi_txt.group(3))
                                 mes_e = meses_es.get(mes_e_str, 1)
-                                doc_fecha_emi = date(anio_e, mes_e, dia_e)
-                            else:
-                                m_f_emi_num = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_limpio, re.IGNORECASE)
-                                if m_f_emi_num:
-                                    try:
-                                        str_ff = m_f_emi_num.group(1).replace('/', '-').replace('.', '-')
-                                        doc_fecha_emi = pd.to_datetime(str_ff, dayfirst=True if len(str_ff.split('-')[0]) <= 2 else False).date()
-                                    except:
-                                        doc_fecha_emi = date.today()
+                                st.session_state["doc_fecha_emi"] = date(anio_e, mes_e, dia_e)
 
-                            # 5. Fecha de Vencimiento / Pago
-                            m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_limpio, re.IGNORECASE)
+                            # 5. Fecha de Vencimiento (Desde sección de Pagos: 2026-10-30 $1.186.199 Pago total)
+                            m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
                             if m_f_venc_pago:
                                 try:
-                                    doc_fecha_venc = pd.to_datetime(m_f_venc_pago.group(1)).date()
+                                    st.session_state["doc_fecha_venc"] = pd.to_datetime(m_f_venc_pago.group(1)).date()
                                 except:
                                     pass
 
-                            # 6. Planta
-                            m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\áéíóúÁÉÍÓÚñÑ]+)', texto_limpio, re.IGNORECASE)
+                            # 6. Planta (Ej: "Planta Viluco")
+                            m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\áéíóúÁÉÍÓÚñÑ]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_planta_pdf:
-                                doc_planta_pdf = m_planta_pdf.group(1).strip().upper()
+                                st.session_state["doc_planta_pdf"] = m_planta_pdf.group(1).strip().upper()
 
-                            # 7. Monto Neto
-                            m_neto_f = re.search(r'MONTO\s*NETO\s*\$?\s*([\d\.\,]+)', texto_limpio, re.IGNORECASE)
+                            # 7. Monto Neto (Ej: MONTO NETO $ 996.806)
+                            m_neto_f = re.search(r'MONTO\s*NETO\s*\$?\s*([\d\.\,]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_neto_f:
                                 try:
                                     limp_f = m_neto_f.group(1).replace('.', '').replace(',', '.')
-                                    doc_monto_neto = int(round(float(limp_f)))
+                                    st.session_state["doc_monto_neto"] = int(round(float(limp_f)))
                                 except:
                                     pass
 
-                            # 8. Detalle del Servicio
-                            m_det_trab = re.search(r'Instalaci[oó]n[^\n]*', texto_fact_pdf, re.IGNORECASE)
-                            if m_det_trab:
-                                doc_detalle = m_det_trab.group(0).strip().upper()
+                            # 8. Detalle del Servicio (Extrae todas las líneas del trabajo hasta la tabla)
+                            lineas_pdf = [l.strip() for l in texto_fact_pdf.split('\n') if l.strip()]
+                            det_lineas = []
+                            capturando = False
+                            for l in lineas_pdf:
+                                if "Trabajos" in l or "Instalación" in l or "Servicio" in l:
+                                    capturando = True
+                                if capturando:
+                                    if any(k in l for k in ["Referencias", "Pagos", "MONTO NETO", "Forma de Pago", "1 SG"]):
+                                        break
+                                    det_lineas.append(l)
+                            if det_lineas:
+                                st.session_state["doc_detalle"] = " ".join(det_lineas).upper()
+                            else:
+                                m_det_gen = re.search(r'Trabajos[^\n]*\n([^\n]+)', texto_fact_pdf, re.IGNORECASE)
+                                if m_det_gen:
+                                    st.session_state["doc_detalle"] = m_det_gen.group(1).strip().upper()
 
-                            st.success(f"✅ Factura PDF N° {doc_factura} ({doc_empresa}) leída correctamente. Datos extraídos sin almacenar el archivo.")
+                            st.success(f"✅ Factura PDF N° {st.session_state['doc_factura']} ({st.session_state['doc_empresa']}) leída correctamente. Datos extraídos sin almacenar el archivo.")
                         else:
                             st.warning("No se pudo extraer texto legible del PDF de la factura.")
                     except Exception as e:
@@ -1356,37 +1365,35 @@ if check_password():
                     
                     folio_elem = root.find(".//Folio")
                     if folio_elem is not None and folio_elem.text:
-                        doc_factura = folio_elem.text.strip()
+                        st.session_state["doc_factura"] = folio_elem.text.strip()
                     
                     recep_elem = root.find(".//RznSocRecep")
                     emisor_elem = root.find(".//RznSoc")
                     if recep_elem is not None and recep_elem.text:
-                        doc_empresa = recep_elem.text.strip().upper()
+                        st.session_state["doc_empresa"] = recep_elem.text.strip().upper()
                     elif emisor_elem is not None and emisor_elem.text:
-                        doc_empresa = emisor_elem.text.strip().upper()
+                        st.session_state["doc_empresa"] = emisor_elem.text.strip().upper()
                         
                     neto_elem = root.find(".//MntNeto")
                     if neto_elem is not None and neto_elem.text:
                         try:
-                            doc_monto_neto = int(round(float(neto_elem.text.strip())))
+                            st.session_state["doc_monto_neto"] = int(round(float(neto_elem.text.strip())))
                         except:
                             pass
 
                     fch_elem = root.find(".//FchEmis")
                     if fch_elem is not None and fch_elem.text:
                         try:
-                            doc_fecha_emi = pd.to_datetime(fch_elem.text.strip()).date()
+                            st.session_state["doc_fecha_emi"] = pd.to_datetime(fch_elem.text.strip()).date()
                         except:
                             pass
 
                     fch_venc_elem = root.find(".//FchVenc")
                     if fch_venc_elem is not None and fch_venc_elem.text:
                         try:
-                            doc_fecha_venc = pd.to_datetime(fch_venc_elem.text.strip()).date()
+                            st.session_state["doc_fecha_venc"] = pd.to_datetime(fch_venc_elem.text.strip()).date()
                         except:
                             pass
-                    elif doc_fecha_emi:
-                        doc_fecha_venc = doc_fecha_emi + timedelta(days=30)
 
                     detalles_items = []
                     for item in root.findall(".//DchItem"):
@@ -1406,9 +1413,9 @@ if check_password():
                                 detalles_items.append(nmb.text.strip())
 
                     if detalles_items:
-                        doc_detalle = " / ".join(detalles_items).upper()
+                        st.session_state["doc_detalle"] = " / ".join(detalles_items).upper()
 
-                    st.success(f"✅ Factura XML N° {doc_factura} ({doc_empresa}) leída correctamente. Monto Neto: ${doc_monto_neto:,.0f}".replace(",", "."))
+                    st.success(f"✅ Factura XML N° {st.session_state['doc_factura']} ({st.session_state['doc_empresa']}) leída correctamente.")
                 except Exception as e:
                     st.error(f"Error al procesar el archivo XML: {e}")
 
@@ -1422,16 +1429,16 @@ if check_password():
             cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
             cot_sel = st.selectbox("Seleccionar Cotización para importar datos:", ["--- Sin Enlace ---"] + cotizaciones_list, key="select_cot_to_fact")
             
-            p_factura = doc_factura
-            p_empresa = doc_empresa if doc_empresa else ""
-            p_planta = doc_planta_pdf if doc_planta_pdf else ""
+            p_factura = st.session_state["doc_factura"]
+            p_empresa = st.session_state["doc_empresa"]
+            p_planta = st.session_state["doc_planta_pdf"]
             p_grupo_serv = "SERVICIO GENERAL"
-            p_detalle = doc_detalle if doc_detalle else ""
-            p_monto = doc_monto_neto if doc_monto_neto > 0 else 0
-            p_moneda = doc_moneda
+            p_detalle = st.session_state["doc_detalle"]
+            p_monto = st.session_state["doc_monto_neto"]
+            p_moneda = st.session_state["doc_moneda"]
             p_fecha_cot = date.today()
-            p_fecha_emi = doc_fecha_emi
-            p_fecha_venc = doc_fecha_venc
+            p_fecha_emi = st.session_state["doc_fecha_emi"]
+            p_fecha_venc = st.session_state["doc_fecha_venc"]
             
             if cot_sel != "--- Sin Enlace ---":
                 row_c = df_cotizaciones[df_cotizaciones["Folio"].astype(str) == str(cot_sel)].iloc[0]
@@ -1659,7 +1666,7 @@ if check_password():
         # =====================================================================
         # APARTADO ELIMINAR FACTURA
         # =====================================================================
-        with st.expander("🗑️️ Eliminar Factura"):
+        with st.expander("🗑 Eliminar Factura"):
             if not df.empty and 'Factura' in df.columns:
                 facturas_del_list = sorted(df['Factura'].astype(str).unique().tolist())
                 factura_a_eliminar = st.selectbox("Selecciona el Número de Factura a Eliminar:", facturas_del_list, key="select_factura_del")
