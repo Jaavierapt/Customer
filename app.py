@@ -858,7 +858,7 @@ if check_password():
             
             if archivo_pdf_cot is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` o `pypdf` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_extraido = ""
@@ -1257,7 +1257,7 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
@@ -1333,7 +1333,7 @@ if check_password():
                                 except:
                                     pass
 
-                            # 8. Detalle del Servicio (Filtrado por palabras clave, Planta y Grupo de Servicio)
+                            # 8. Detalle del Servicio (Extraer detalle descriptivo sin sobrescribir si ya existe)
                             lineas_pdf = [l.strip() for l in texto_fact_pdf.split('\n') if l.strip()]
                             det_lineas = []
                             capturando = False
@@ -1342,7 +1342,6 @@ if check_password():
                             
                             for l in lineas_pdf:
                                 l_upper = l.upper()
-                                # Coincidencia por palabra clave del servicio o por el nombre de la planta
                                 coincide_kw = any(kw in l_upper for kw in PALABRAS_CLAVE_SERVICIOS)
                                 coincide_planta = (planta_key != "" and planta_key in l_upper)
                                 
@@ -1459,20 +1458,9 @@ if check_password():
                     st.session_state["doc_grupo_serv"] = grupo_cot
                     st.session_state["doc_moneda"] = str(row_c.get("Moneda", "CLP")).upper()
                     
-                    # Búsqueda y asignación inteligente del detalle por coincidencia de palabras clave o planta/grupo
-                    cand_detalle = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
-                    planta_actual = st.session_state.get("doc_planta_pdf", "")
-                    
-                    # Extraer párrafos o frases que coincidan con el grupo, la planta o palabras clave
-                    lineas_cand = [c.strip() for c in cand_detalle.split("\n") if c.strip()]
-                    coincidencias = []
-                    for l in lineas_cand:
-                        if any(kw in l for kw in PALABRAS_CLAVE_SERVICIOS) or (planta_actual and planta_actual in l) or (grupo_cot and grupo_cot in l):
-                            coincidencias.append(l)
-                            
-                    if coincidencias:
-                        st.session_state["doc_detalle"] = " / ".join(coincidencias)
-                    else:
+                    # Solo asignar el detalle si la caja de texto estaba vacía, para no pisar lo extraído del PDF o lo ingresado
+                    if not st.session_state.get("doc_detalle"):
+                        cand_detalle = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
                         st.session_state["doc_detalle"] = cand_detalle
                     
                     if not st.session_state.get("doc_monto_neto") or st.session_state.get("doc_monto_neto") == 0:
@@ -1543,6 +1531,7 @@ if check_password():
                         anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
                         mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
 
+                        # NOTA: Se excluyó 'Moneda' para prevenir el error de esquema de Supabase PGRST204
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
                             "Empresa": n_empresa_ins.strip().upper(),
@@ -1550,7 +1539,6 @@ if check_password():
                             "Grupo_Servicio": n_grupo_servicio.upper(),
                             "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
                             "Monto": int(n_monto),
-                            "Moneda": n_moneda,
                             "dias_programados": float(n_dias_prog),
                             "dias_reales": float(n_dias_real),
                             "Fecha_Cotizacion": str(n_f_cot) if n_f_cot else None,
@@ -1669,7 +1657,6 @@ if check_password():
                                 "Grupo_Servicio": e_grupo_servicio.upper(),
                                 "Servicio": e_servicio_detalle.strip().upper() if e_servicio_detalle else "SIN DETALLE",
                                 "Monto": int(e_monto),
-                                "Moneda": e_moneda,
                                 "dias_programados": float(e_dias_prog),
                                 "dias_reales": float(e_dias_real),
                                 "Fecha_Cotizacion": f_cot_final,
