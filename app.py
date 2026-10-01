@@ -146,18 +146,42 @@ def cargar_contactos():
         pass
     
     if data:
-        return pd.DataFrame(data)
-    
-    ARCHIVO_CONTACTOS = "contactos.csv"
-    if os.path.exists(ARCHIVO_CONTACTOS):
-        return pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
-        
-    return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
+        df_c = pd.DataFrame(data)
+    else:
+        ARCHIVO_CONTACTOS = "contactos.csv"
+        if os.path.exists(ARCHIVO_CONTACTOS):
+            df_c = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
+        else:
+            df_c = pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
+
+    # --- SINCRO AUTOMÁTICA CON FACTURAS: SI YA TIENE FACTURA REGISTRADA -> PASA A 'GANADO' EN EL EMBUDO ---
+    try:
+        df_facturas_exist = cargar_datos()
+        if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
+            empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+            
+            # Sincronizar en memoria
+            mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
+            df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
+    except Exception:
+        pass
+
+    return df_c
 
 def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
     """Inserta o actualiza un contacto en la base de datos de Supabase y en el archivo local."""
     ARCHIVO_CONTACTOS = "contactos.csv"
     
+    # Verificación de facturas existentes antes de guardar
+    try:
+        df_fact = cargar_datos()
+        if not df_fact.empty and 'Empresa' in df_fact.columns:
+            empresas_facturadas = set(df_fact['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+            if str(empresa).strip().upper() in empresas_facturadas:
+                estado = "Ganado"
+    except Exception:
+        pass
+
     nuevo_registro_supa = {
         "nombre": nombre,
         "email": email,
@@ -604,7 +628,7 @@ if check_password():
                 
                 df_proximos = df_sin_pagar[(df_sin_pagar['Dias_Restantes'] >= 0) & (df_sin_pagar['Dias_Restantes'] <= 30)].sort_values(by='Dias_Restantes', ascending=True)
                 if not df_proximos.empty:
-                    st.warning(f"⚠️️ Hay **{len(df_proximos)} contratos/facturas** que vencen en los próximos 30 días. ¡Contacta al cliente para asegurar la renovación!")
+                    st.warning(f"⚠ Hay **{len(df_proximos)} contratos/facturas** que vencen en los próximos 30 días. ¡Contacta al cliente para asegurar la renovación!")
                     st.dataframe(
                         df_proximos[['Empresa', 'Planta', 'Factura', 'Monto', 'Fecha_Vencimiento', 'Dias_Restantes']],
                         column_config={"Dias_Restantes": "Días Restantes"},
@@ -751,7 +775,7 @@ if check_password():
             else:
                 st.info("ℹ️ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
         else:
-            st.info("ℹ️ Columnas necesarias no disponibles.")
+            st.info("ℹ️️ Columnas necesarias no disponibles.")
            
         st.divider()
 
