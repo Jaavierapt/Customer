@@ -143,21 +143,60 @@ def eliminar_factura(numero_factura):
         return False
 
 def cargar_contactos():
-    """Consulta todos los registros de la tabla 'Contactos' en Supabase."""
-    response = supabase.table("Contactos").select("*").execute()
-    data = response.data
-    return pd.DataFrame(data)
+    """Consulta todos los registros de la tabla 'Contactos' en Supabase o fallback local."""
+    data = []
+    try:
+        response = supabase.table("Contactos").select("*").execute()
+        data = response.data
+    except Exception:
+        pass
+    
+    if data:
+        return pd.DataFrame(data)
+    
+    ARCHIVO_CONTACTOS = "contactos.csv"
+    if os.path.exists(ARCHIVO_CONTACTOS):
+        return pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
+        
+    return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
-def guardar_contacto(nombre, email, estado, telefono=""):
-    """Inserta un nuevo contacto en la base de datos de Supabase."""
-    nuevo_registro = {
+def guardar_contacto(nombre, email, estado, telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
+    """Inserta o actualiza un contacto en la base de datos de Supabase y en el archivo local."""
+    ARCHIVO_CONTACTOS = "contactos.csv"
+    
+    nuevo_registro_supa = {
         "nombre": nombre,
         "email": email,
         "estado": estado,
         "telefono": telefono
     }
-    response = supabase.table("Contactos").insert(nuevo_registro).execute()
-    return response
+    
+    try:
+        supabase.table("Contactos").upsert(nuevo_registro_supa).execute()
+    except Exception:
+        pass
+        
+    # Sincronizar archivo local CSV
+    df_cont = cargar_contactos()
+    if not df_cont.empty and 'Correo' in df_cont.columns:
+        df_cont = df_cont[df_cont['Correo'].astype(str).str.lower() != str(email).lower()]
+    elif not df_cont.empty and 'email' in df_cont.columns:
+        df_cont = df_cont[df_cont['email'].astype(str).str.lower() != str(email).lower()]
+        
+    nueva_fila = pd.DataFrame([{
+        "Nombre": nombre,
+        "Empresa": empresa,
+        "Planta": planta,
+        "Correo": email,
+        "Celular": telefono,
+        "Estado": estado,
+        "Valor": int(valor),
+        "Bitacora": "",
+        "Rol_Contacto": rol
+    }])
+    
+    df_cont = pd.concat([df_cont, nueva_fila], ignore_index=True)
+    df_cont.to_csv(ARCHIVO_CONTACTOS, index=False)
 
 # --- GESTIÓN DE COTIZACIONES ---
 ARCHIVO_COTIZACIONES = "cotizaciones.csv"
@@ -197,7 +236,7 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y archivo local."""
+    """Guarda o actualiza cotización en Supabase y archivo local, y registra automáticamente el contacto."""
     df_cot = cargar_cotizaciones()
     nueva_cot = pd.DataFrame([dict_cot])
     df_cot = pd.concat([df_cot[df_cot['Folio'].astype(str) != str(dict_cot['Folio'])], nueva_cot], ignore_index=True)
@@ -207,6 +246,23 @@ def guardar_cotizacion(dict_cot):
         supabase.table("cotizaciones").upsert(dict_cot).execute()
     except Exception:
         pass
+        
+    # Auto-guardar contacto en el CRM si trae email o nombre
+    nom_c = dict_cot.get("Contacto", "").strip()
+    em_c = dict_cot.get("Email_Contacto", "").strip()
+    if nom_c or em_c:
+        if not em_c and nom_c:
+            em_c = f"{nom_c.lower().replace(' ', '.')}@{dict_cot.get('Empresa', 'cliente').lower().replace(' ', '')}.cl"
+        guardar_contacto(
+            nombre=nom_c if nom_c else em_c.split("@")[0].title(),
+            email=em_c,
+            estado="Propuesta" if dict_cot.get("Estado") == "APROBADA" else "Prospecto",
+            telefono=dict_cot.get("Fono_Contacto", ""),
+            empresa=dict_cot.get("Empresa", ""),
+            planta=dict_cot.get("Planta", ""),
+            valor=dict_cot.get("Monto_Total", 0),
+            rol="Tomador de Decisiones"
+        )
 
 def eliminar_cotizacion(folio_cot):
     """Elimina una cotización en Supabase y en el archivo local CSV."""
@@ -478,11 +534,7 @@ if check_password():
 
     st.title("🚀 Itelcam CRM - Gestión Estratégica")
 
-    if not os.path.exists(ARCHIVO_CONTACTOS):
-        pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]).to_csv(ARCHIVO_CONTACTOS, index=False)
-     
-    df_contactos = pd.read_csv(ARCHIVO_CONTACTOS, dtype={"Bitacora": str, "Nombre": str, "Empresa": str, "Planta": str, "Correo": str, "Celular": str, "Estado": str, "Rol_Contacto": str})
-   
+    df_contactos = cargar_contactos()
     if 'Rol_Contacto' not in df_contactos.columns:
         df_contactos['Rol_Contacto'] = 'Influenciador'
         df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
@@ -707,6 +759,23 @@ if check_password():
                             st.write(f"Sin montos en {anio}")
                     else:
                         st.write(f"Sin pagos en {anio}")
+            st.divider()
+            
+            # --- HISTORIAL DE COTIZACIONES Y PROPUESTAS POR PLANTA / CLIENTE ---
+            st.subheader(f"📑 Propuestas y Cotizaciones Emitidas - {empresa_sel} ({planta_sel})")
+            if not df_cotizaciones.empty:
+                df_c_planta = df_cotizaciones[(df_cotizaciones['Empresa'].str.upper() == empresa_sel.upper()) & (df_cotizaciones['Planta'].str.upper() == planta_sel.upper())]
+                if not df_c_planta.empty:
+                    st.dataframe(
+                        df_c_planta[["Folio", "Contacto", "Fecha_Emision", "Moneda", "Grupo_Servicio", "Detalle_Servicio", "Monto_Total", "Estado"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.info(f"No hay cotizaciones registradas específicamente para la planta {planta_sel}.")
+            else:
+                st.info("No hay cotizaciones registradas en el sistema.")
+
             st.divider()
             st.subheader(f"📈 Estacionalidad Mensual de Pagos por Planta: {planta_sel} ({empresa_sel})")
            
@@ -1070,7 +1139,7 @@ if check_password():
                         }
                         guardar_cotizacion(dict_guardar)
                         st.cache_data.clear()
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente en {cot_moneda} con fecha {cot_f_emi}!")
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente en {cot_moneda} y contacto sincronizado en el CRM!")
                         st.rerun()
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
@@ -1204,7 +1273,7 @@ if check_password():
             df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
                 
             st.dataframe(
-                df_cot_disp[["Folio", "Empresa", "Planta", "Fecha_Emision", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
+                df_cot_disp[["Folio", "Empresa", "Planta", "Contacto", "Fecha_Emision", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
                 column_config={
                     "Monto_Neto": st.column_config.NumberColumn("Monto Neto", format="%d"),
                     "Monto_Total": st.column_config.NumberColumn("Total", format="%d"),
@@ -1257,7 +1326,7 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
@@ -1458,7 +1527,6 @@ if check_password():
                     st.session_state["doc_grupo_serv"] = grupo_cot
                     st.session_state["doc_moneda"] = str(row_c.get("Moneda", "CLP")).upper()
                     
-                    # Solo asignar el detalle si la caja de texto estaba vacía, para no pisar lo extraído del PDF o lo ingresado
                     if not st.session_state.get("doc_detalle"):
                         cand_detalle = str(row_c.get("Detalle_Servicio", row_c.get("Glosa", ""))).strip().upper()
                         st.session_state["doc_detalle"] = cand_detalle
@@ -1531,7 +1599,6 @@ if check_password():
                         anio_val = int(pd.to_datetime(fecha_referencia).year) if pd.notna(fecha_referencia) else None
                         mes_val = int(pd.to_datetime(fecha_referencia).month) if pd.notna(fecha_referencia) else None
 
-                        # NOTA: Se excluyó 'Moneda' para prevenir el error de esquema de Supabase PGRST204
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
                             "Empresa": n_empresa_ins.strip().upper(),
@@ -1556,8 +1623,20 @@ if check_password():
                         
                         try:
                             supabase.table("ingresos").upsert(nuevo_registro_supa).execute()
+                            
+                            # Registrar automáticamente empresa/planta como contacto activo si no existe
+                            guardar_contacto(
+                                nombre=f"Contacto {n_empresa_ins.strip().upper()}",
+                                email=f"contacto@{n_empresa_ins.strip().lower().replace(' ', '')}.cl",
+                                estado="Ganado" if n_estado_pago == "Pagado" else "Propuesta",
+                                empresa=n_empresa_ins.strip().upper(),
+                                planta=n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
+                                valor=int(n_monto),
+                                rol="Finanzas / Compras"
+                            )
+                            
                             st.cache_data.clear()
-                            st.success(f"¡Factura #{n_factura} guardada y sincronizada en Supabase exitosamente!")
+                            st.success(f"¡Factura #{n_factura} guardada y sincronizada exitosamente en Supabase!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
@@ -1811,6 +1890,9 @@ if check_password():
 
         st.divider()
           
+    # =========================================================================
+    # SECCIÓN: EMBUDO DE VENTAS (ACCESIBLE Y VISIBLE PARA TODOS LOS USUARIOS)
+    # =========================================================================
     with tab5:
         st.header("🔥 Embudo de Ventas y Métricas Comerciales")
 
@@ -1865,7 +1947,7 @@ if check_password():
 
         st.divider()
 
-        with st.expander("➕ Crear Nuevo Contacto", expanded=True):
+        with st.expander("➕ Crear Nuevo Contacto (Manual)", expanded=False):
             with st.form("form_contacto_unificado"):
                 c1, c2 = st.columns(2)
                 nombre = c1.text_input("Nombre completo *")
@@ -1881,31 +1963,8 @@ if check_password():
 
                 if submitted:
                     if nombre and correo and empresa:
-                        try:
-                            guardar_contacto(nombre, correo, estado, celular)
-                            supa_success = True
-                        except Exception as e:
-                            st.error(f"Error al guardar en Supabase: {e}")
-                            supa_success = False
-
-                        nueva = pd.DataFrame([{
-                            "Nombre": nombre,
-                            "Empresa": empresa,
-                            "Planta": planta,
-                            "Correo": correo,
-                            "Celular": celular,
-                            "Estado": estado,
-                            "Valor": int(valor),
-                            "Bitacora": "",
-                            "Rol_Contacto": rol
-                        }])
-                        pd.concat([df_contactos, nueva], ignore_index=True).to_csv(ARCHIVO_CONTACTOS, index=False)
-                         
-                        if supa_success:
-                            st.success(f"¡Cliente {nombre} registrado exitosamente en Supabase y Embudo Local!")
-                        else:
-                            st.warning(f"¡Cliente {nombre} guardado en tu sistema local, pero hubo un error de conexión con Supabase!")
-                             
+                        guardar_contacto(nombre, correo, estado, celular, empresa, planta, valor, rol)
+                        st.success(f"¡Cliente {nombre} registrado exitosamente!")
                         st.session_state["active_tab"] = 5
                         st.rerun()
                     else:
@@ -1913,7 +1972,7 @@ if check_password():
       
         st.divider()
 
-        st.subheader("📊 Gráfico de Conversión")
+        st.subheader("📊 Gráfico de Conversión de Oportunidades")
         conteo_estados = df_contactos['Estado'].value_counts().reindex(estados).fillna(0).reset_index()
         conteo_estados.columns = ['Etapa', 'Cantidad']
 
@@ -1926,6 +1985,8 @@ if check_password():
         st.plotly_chart(fig_funnel, use_container_width=True)
         st.divider()
 
+        # TABLERO KANBAN VISIBLE PARA TODOS LOS USUARIOS
+        st.subheader("📌 Tablero de Contactos por Etapa del Embudo (Visibilidad Global)")
         cols = st.columns(5)
        
         for i, col in enumerate(cols):
@@ -1933,13 +1994,15 @@ if check_password():
                 st.subheader(estados[i])
                 contactos_estado = df_contactos[df_contactos["Estado"] == estados[i]]
                 for idx, row in contactos_estado.iterrows():
-                    monto_val_row = f"${int(row['Valor']):,.0f}".replace(",", ".")
-                    st.write(f"*{row['Nombre']}*")
-                    st.write(f"Empresa: {row['Empresa']}")
-                    st.write(f"Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
-                    st.write(f"Valor: {monto_val_row}")
+                    monto_val_row = f"${int(row.get('Valor', 0)):,.0f}".replace(",", ".")
+                    st.write(f"👤 **{row.get('Nombre', 'Sin Nombre')}**")
+                    st.write(f"🏢 Empresa: {row.get('Empresa', 'N/A')}")
+                    if row.get('Planta'):
+                        st.write(f"🏭 Planta: {row.get('Planta')}")
+                    st.write(f"💼 Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
+                    st.write(f"💰 Valor: {monto_val_row}")
                    
-                    correo_contacto = row.get('Correo', '')
+                    correo_contacto = row.get('Correo', row.get('email', ''))
                     nombre_contacto = row.get('Nombre', 'Cliente')
                    
                     if pd.notna(correo_contacto) and str(correo_contacto).strip() != "":
@@ -1967,7 +2030,7 @@ if check_password():
                     if pd.isna(nota_actual):
                         nota_actual = ""
                        
-                    with st.expander(f"📝 Bitácora ({row['Nombre']})"):
+                    with st.expander(f"📝 Bitácora ({row.get('Nombre', 'Contacto')})"):
                         nueva_nota = st.text_area(
                             "Resumen de llamada/reunión:",
                             value=nota_actual,
@@ -2021,14 +2084,14 @@ if check_password():
                                 st.success("¡Guardado!")
                                 st.rerun()
                         with col_b2:
-                            nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']), key=f"mov_{idx}")
+                            nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
                             if nuevo_estado_rapido != row['Estado']:
                                 df_contactos.loc[idx, 'Estado'] = nuevo_estado_rapido
                                 df_contactos.to_csv(ARCHIVO_CONTACTOS, index=False)
                                 st.rerun()
 
-                    with st.expander(f"⏱️ Línea de Tiempo ({row['Nombre']})"):
-                        filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row['Nombre']]
+                    with st.expander(f"⏱️ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
+                        filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row.get('Nombre')]
                         if not filtro_inter.empty:
                             for _, inter_row in filtro_inter.iterrows():
                                 st.caption(f"[{inter_row['Fecha']}] **{inter_row['Tipo']}**: {inter_row['Detalle']}")
@@ -2042,7 +2105,7 @@ if check_password():
 
         st.divider()
 
-        st.subheader("🎯 Calificación de Prospectos")
+        st.subheader("🎯 Calificación de Prospectos (Lead Scoring)")
        
         def calcular_lead_scoring(row):
             score_valor = 0
@@ -2113,7 +2176,7 @@ if check_password():
 
         st.divider()
 
-        st.subheader("💰 Pronóstico de Ingresos")
+        st.subheader("💰 Pronóstico de Ingresos (Forecast)")
         probabilidades = {
             "Prospecto": 0.10,
             "Contactado": 0.25,
@@ -2121,7 +2184,7 @@ if check_password():
             "Ganado": 1.00,
             "Perdido": 0.00
         }
-        df_contactos['Probabilidad'] = df_contactos['Estado'].map(probabilidades)
+        df_contactos['Probabilidad'] = df_contactos['Estado'].map(probabilidades).fillna(0.10)
         df_contactos['Valor_Ponderado'] = df_contactos['Valor'] * df_contactos['Probabilidad']
 
         total_pipeline = int(df_contactos[df_contactos['Estado'] != 'Perdido']['Valor'].sum())
@@ -2176,12 +2239,12 @@ if check_password():
                     st.write(f"Editando: {row['Nombre']}")
                     n_nombre = st.text_input("Nombre", row['Nombre'])
                     n_empresa = st.text_input("Empresa", row['Empresa'])
-                    n_planta = st.text_input("Planta", row['Planta'])
+                    n_planta = st.text_input("Planta", row.get('Planta', ''))
                     n_correo = st.text_input("Correo", row.get('Correo', ''))
                     n_celular = st.text_input("Celular", row.get('Celular', ''))
-                    n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']))
+                    n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0)
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
-                    n_valor = st.number_input("Valor", value=int(row['Valor']), min_value=0, step=1000)
+                    n_valor = st.number_input("Valor", value=int(row['Valor']) if pd.notna(row['Valor']) else 0, min_value=0, step=1000)
                    
                     if st.form_submit_button("💾 Guardar Cambios"):
                         df_contactos.loc[idx, 'Nombre'] = n_nombre
