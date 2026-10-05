@@ -1459,11 +1459,11 @@ if check_password():
         if "doc_moneda" not in st.session_state:
             st.session_state["doc_moneda"] = "CLP"
         if "doc_fecha_cot" not in st.session_state:
-            st.session_state["doc_fecha_cot"] = date.today()
+            st.session_state["doc_fecha_cot"] = None
         if "doc_fecha_emi" not in st.session_state:
-            st.session_state["doc_fecha_emi"] = date.today()
+            st.session_state["doc_fecha_emi"] = None
         if "doc_fecha_venc" not in st.session_state:
-            st.session_state["doc_fecha_venc"] = date.today() + timedelta(days=30)
+            st.session_state["doc_fecha_venc"] = None
         if "doc_detalle" not in st.session_state:
             st.session_state["doc_detalle"] = ""
 
@@ -1678,7 +1678,7 @@ if check_password():
                         try:
                             st.session_state["doc_fecha_cot"] = pd.to_datetime(raw_f_cot).date()
                         except:
-                            st.session_state["doc_fecha_cot"] = date.today()
+                            st.session_state["doc_fecha_cot"] = None
 
             cot_seleccionada = st.selectbox(
                 "Seleccionar Cotización para importar datos:",
@@ -1688,7 +1688,7 @@ if check_password():
             )
 
             if cot_seleccionada != "--- Sin Enlace ---":
-                st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot']})")
+                st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot'] if st.session_state['doc_fecha_cot'] else 'Sin Fecha'})")
 
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
@@ -1718,7 +1718,7 @@ if check_password():
                 with fc2:
                     n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
                     if n_estado_pago == "Pagado":
-                        n_f_pago = st.date_input("Fecha de Pago", value=datetime.now())
+                        n_f_pago = st.date_input("Fecha de Pago", value=None)
                     else:
                         n_f_pago = st.date_input("Fecha de Pago", value=None)
                         
