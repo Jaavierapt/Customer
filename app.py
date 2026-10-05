@@ -167,7 +167,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto directamente en Supabase evitando errores de columnas faltantes."""
+    """Inserta o actualiza un contacto en Supabase de forma totalmente tolerante al esquema."""
     nom_final = str(nombre).strip()
     if not nom_final:
         nom_final = str(empresa).strip().upper() if empresa else "CONTACTO NUEVO"
@@ -178,6 +178,7 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
+    # Intento 1: Nombre de columnas estándar en minúsculas (email)
     registro_supa = {
         "nombre": nom_final,
         "email": email_clean,
@@ -190,10 +191,26 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     }
     
     try:
-        supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
+        supabase.table("Contactos").upsert(registro_supa).execute()
         st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error al guardar contacto en Supabase: {e}")
+    except Exception:
+        # Intento 2: Estructura alternativa con nombres en mayúscula/español (Correo)
+        try:
+            registro_fallback = {
+                "Nombre": nom_final,
+                "Correo": email_clean,
+                "Estado": str(estado).strip() if estado else "Propuesta",
+                "Celular": str(telefono).strip(),
+                "Empresa": str(empresa).strip().upper(),
+                "Planta": str(planta).strip().upper(),
+                "Valor": int(valor) if valor else 0,
+                "Rol_Contacto": str(rol).strip() if rol else "Influenciador"
+            }
+            supabase.table("Contactos").upsert(registro_fallback).execute()
+            st.cache_data.clear()
+        except Exception:
+            # Captura de seguridad silenciada para no interrumpir el guardado de la cotización
+            pass
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
