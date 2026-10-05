@@ -853,8 +853,8 @@ if check_password():
                     st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
                     df_churn_display['Variacion_%'] = df_churn_display['Variacion_%'].map(lambda x: f"{x:.1f}%")
-                    df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
-                    df_churn_display['Monto_2026'] = df_churn_display['Monto_2026'].map(lambda x: f"${int(x):,.0f}".replace(",", "."))
+                    df_churn_display['Monto_2025'] = df_churn_display['Monto_2025'].map(lambda x: f"${int(x):,.0f}".replace(",", ".") )
+                    df_churn_display['Monto_2026'] = df_churn_display['Monto_2026'].map(lambda x: f"${int(x):,.0f}".replace(",", ".") )
                     df_churn_display.columns = ['Empresa', 'Mes', 'Pagado 2025', 'Pagado 2026', 'Variación (%)']
                     st.dataframe(df_churn_display, hide_index=True, use_container_width=True)
                 else:
@@ -1050,22 +1050,38 @@ if check_password():
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
 
-        p_pdf_folio = f"137{len(df_cotizaciones)+7}"
-        p_pdf_empresa = ""
-        p_pdf_rut = ""
-        p_pdf_planta = ""
-        p_pdf_contacto = ""
-        p_pdf_email_cont = ""
-        p_pdf_fono_cont = ""
-        p_pdf_ejecutivo = ""
-        p_pdf_email_ejec = ""
-        p_pdf_fono_ejec = ""
-        p_pdf_neto = 0
-        p_pdf_moneda = "CLP"
-        p_pdf_glosa = ""
-        p_pdf_detalle = ""
-        p_pdf_fecha_emi = date.today()
-        p_pdf_fecha_val = date.today() + timedelta(days=15)
+        if "cot_folio" not in st.session_state:
+            st.session_state["cot_folio"] = f"137{len(df_cotizaciones)+7}"
+        if "cot_empresa" not in st.session_state:
+            st.session_state["cot_empresa"] = ""
+        if "cot_rut" not in st.session_state:
+            st.session_state["cot_rut"] = ""
+        if "cot_planta" not in st.session_state:
+            st.session_state["cot_planta"] = ""
+        if "cot_contacto" not in st.session_state:
+            st.session_state["cot_contacto"] = ""
+        if "cot_email_cont" not in st.session_state:
+            st.session_state["cot_email_cont"] = ""
+        if "cot_fono_cont" not in st.session_state:
+            st.session_state["cot_fono_cont"] = ""
+        if "cot_ejecutivo" not in st.session_state:
+            st.session_state["cot_ejecutivo"] = ""
+        if "cot_email_ejec" not in st.session_state:
+            st.session_state["cot_email_ejec"] = ""
+        if "cot_fono_ejec" not in st.session_state:
+            st.session_state["cot_fono_ejec"] = ""
+        if "cot_neto" not in st.session_state:
+            st.session_state["cot_neto"] = 0
+        if "cot_moneda" not in st.session_state:
+            st.session_state["cot_moneda"] = "CLP"
+        if "cot_glosa" not in st.session_state:
+            st.session_state["cot_glosa"] = ""
+        if "cot_detalle" not in st.session_state:
+            st.session_state["cot_detalle"] = ""
+        if "cot_fecha_emi" not in st.session_state:
+            st.session_state["cot_fecha_emi"] = date.today()
+        if "cot_fecha_val" not in st.session_state:
+            st.session_state["cot_fecha_val"] = date.today() + timedelta(days=15)
 
         with st.expander("📄 Cargar e Importar Cotización desde Archivo PDF", expanded=False):
             st.write("Sube el PDF de una cotización emitida para extraer automáticamente su información. *(No almacena archivos)*")
@@ -1096,23 +1112,23 @@ if check_password():
                             import re
                             
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_extraido, re.IGNORECASE):
-                                p_pdf_moneda = "USD"
+                                st.session_state["cot_moneda"] = "USD"
                             else:
-                                p_pdf_moneda = "CLP"
+                                st.session_state["cot_moneda"] = "CLP"
 
                             m_folio = re.search(r'(?:Folio|Cotizaci[oó]n|N[°º])\s*[:#]?\s*(\d+)', texto_extraido, re.IGNORECASE)
                             if m_folio:
-                                p_pdf_folio = m_folio.group(1).strip()
+                                st.session_state["cot_folio"] = m_folio.group(1).strip()
 
                             m_rut = re.search(r'\b(\d{1,2}\.\d{3}\.\d{3}[-–][0-9kK]|\d{7,8}[-–][0-9kK])\b', texto_extraido)
                             if m_rut:
-                                p_pdf_rut = m_rut.group(1).strip()
+                                st.session_state["cot_rut"] = m_rut.group(1).strip()
 
                             m_f_emi = re.search(r'(?:Fecha\s*Emisi[oó]n|Emisi[oó]n|Fecha)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_emi:
                                 try:
                                     str_f = m_f_emi.group(1).replace('/', '-').replace('.', '-')
-                                    p_pdf_fecha_emi = pd.to_datetime(str_f, dayfirst=True if len(str_f.split('-')[0]) <= 2 else False).date()
+                                    st.session_state["cot_fecha_emi"] = pd.to_datetime(str_f, dayfirst=True if len(str_f.split('-')[0]) <= 2 else False).date()
                                 except:
                                     pass
 
@@ -1120,73 +1136,63 @@ if check_password():
                             if m_f_val:
                                 try:
                                     str_fv = m_f_val.group(1).replace('/', '-').replace('.', '-')
-                                    p_pdf_fecha_val = pd.to_datetime(str_fv, dayfirst=True if len(str_fv.split('-')[0]) <= 2 else False).date()
+                                    st.session_state["cot_fecha_val"] = pd.to_datetime(str_fv, dayfirst=True if len(str_fv.split('-')[0]) <= 2 else False).date()
                                 except:
-                                    p_pdf_fecha_val = p_pdf_fecha_emi + timedelta(days=15)
-                            else:
-                                p_pdf_fecha_val = p_pdf_fecha_emi + timedelta(days=15)
+                                    if st.session_state["cot_fecha_emi"]:
+                                        st.session_state["cot_fecha_val"] = st.session_state["cot_fecha_emi"] + timedelta(days=15)
 
                             m_neto = re.search(r'(?:Neto|Subtotal|Sub-Total)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
                             if m_neto:
                                 try:
                                     limp = m_neto.group(1).replace('.', '').replace(',', '.')
-                                    p_pdf_neto = int(round(float(limp)))
+                                    st.session_state["cot_neto"] = int(round(float(limp)))
                                 except:
                                     pass
 
                             emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', texto_extraido)
                             for em in emails:
                                 if "itelcam" in em.lower():
-                                    p_pdf_email_ejec = em
-                                elif not p_pdf_email_cont:
-                                    p_pdf_email_cont = em
+                                    st.session_state["cot_email_ejec"] = em
+                                elif not st.session_state["cot_email_cont"]:
+                                    st.session_state["cot_email_cont"] = em
 
                             fonos = re.findall(r'(?:\+?56\s?)?(?:9\s?\d{8}|\d{2}\s?\d{7})', texto_extraido)
                             if len(fonos) >= 1:
-                                p_pdf_fono_ejec = fonos[0].replace(" ", "")
+                                st.session_state["cot_fono_ejec"] = fonos[0].replace(" ", "")
                             if len(fonos) >= 2:
-                                p_pdf_fono_cont = fonos[1].replace(" ", "")
+                                st.session_state["cot_fono_cont"] = fonos[1].replace(" ", "")
 
                             m_emp = re.search(r'(?:Señores|Señor(?:es)?|Empresa|Raz[oó]n Social|Cliente)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
                             if m_emp:
                                 val_e = m_emp.group(1).strip()
                                 val_e = re.split(r'\b(?:RUT|Planta|Sucursal|Atenci[oó]n|Fecha)\b', val_e, flags=re.IGNORECASE)[0].strip()
                                 if len(val_e) > 2:
-                                    p_pdf_empresa = val_e.upper()
+                                    st.session_state["cot_empresa"] = val_e.upper()
 
                             m_cont = re.search(r'(?:Contacto|Atenci[oó]n|Atte|Estimado)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
                             if m_cont:
                                 val_c = m_cont.group(1).strip()
                                 val_c = re.split(r'\b(?:Email|Correo|Fono|Tel[eé]fono|RUT)\b', val_c, flags=re.IGNORECASE)[0].strip()
                                 if len(val_c) > 2:
-                                    p_pdf_contacto = val_c
+                                    st.session_state["cot_contacto"] = val_c
 
                             m_ejec = re.search(r'(?:Ejecutivo|Atendida por|Vendedor|Emitido por)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
                             if m_ejec:
                                 val_ej = m_ejec.group(1).strip()
                                 val_ej = re.split(r'\b(?:Email|Correo|Fono|Tel[eé]fono)\b', val_ej, flags=re.IGNORECASE)[0].strip()
                                 if len(val_ej) > 2:
-                                    p_pdf_ejecutivo = val_ej
+                                    st.session_state["cot_ejecutivo"] = val_ej
 
                             m_planta = re.search(r'(?:Planta|Sucursal|Direcci[oó]n)\s*[:#]?\s*([^\n]+)', texto_extraido, re.IGNORECASE)
                             if m_planta:
                                 val_p = m_planta.group(1).strip()
                                 val_p = re.split(r'\b(?:RUT|Contacto|Fecha)\b', val_p, flags=re.IGNORECASE)[0].strip()
                                 if len(val_p) > 2:
-                                    p_pdf_planta = val_p.upper()
-
-                            if not p_pdf_empresa and p_pdf_email_cont:
-                                dom = p_pdf_email_cont.split("@")[-1].lower()
-                                if "arcor" in dom or "dosenuno" in dom:
-                                    p_pdf_empresa = "ARCOR / DOS EN UNO"
-                                elif "agrosuper" in dom:
-                                    p_pdf_empresa = "AGROSUPER"
-                                elif "cmpc" in dom:
-                                    p_pdf_empresa = "CMPC"
+                                    st.session_state["cot_planta"] = val_p.upper()
 
                             m_glosa = re.search(r'(?:Glosa|Descripci[oó]n|Trabajo a realizar)\s*[:#]?\s*([^\n]+(?:\n[^\n]+){0,3})', texto_extraido, re.IGNORECASE)
                             if m_glosa:
-                                p_pdf_glosa = m_glosa.group(1).strip()
+                                st.session_state["cot_glosa"] = m_glosa.group(1).strip()
 
                             st.success("✅ Archivo PDF procesado exitosamente. Fechas y datos extraídos correctamente.")
                         else:
@@ -1210,51 +1216,45 @@ if check_password():
                 key="select_contacto_cotizacion_manual"
             )
 
-            sug_nombre = p_pdf_contacto
-            sug_email = p_pdf_email_cont
-            sug_fono = p_pdf_fono_cont
-            sug_empresa = p_pdf_empresa
-            sug_planta = p_pdf_planta
-
             if contacto_cot_sel != "➕ Crear/Ingresar Nuevo Contacto" and not df_contactos.empty:
                 nombre_extraido = contacto_cot_sel.split(" (")[0].strip()
                 m_match = df_contactos[df_contactos['Nombre'].astype(str).str.strip() == nombre_extraido]
                 if not m_match.empty:
                     row_m = m_match.iloc[0]
-                    sug_nombre = str(row_m.get('Nombre', '')).strip()
-                    sug_email = str(row_m.get('Correo', row_m.get('email', ''))).strip()
-                    sug_fono = str(row_m.get('Celular', row_m.get('telefono', ''))).strip()
-                    sug_empresa = str(row_m.get('Empresa', '')).strip().upper()
-                    sug_planta = str(row_m.get('Planta', '')).strip().upper()
+                    st.session_state["cot_contacto"] = str(row_m.get('Nombre', '')).strip()
+                    st.session_state["cot_email_cont"] = str(row_m.get('Correo', row_m.get('email', ''))).strip()
+                    st.session_state["cot_fono_cont"] = str(row_m.get('Celular', row_m.get('telefono', ''))).strip()
+                    st.session_state["cot_empresa"] = str(row_m.get('Empresa', '')).strip().upper()
+                    st.session_state["cot_planta"] = str(row_m.get('Planta', '')).strip().upper()
 
             with st.form("form_nueva_cotizacion", clear_on_submit=True):
                 st.subheader("1. Identificación y Encabezado del Documento")
                 c_head1, c_head2, c_head3 = st.columns(3)
                 
                 with c_head1:
-                    cot_folio = st.text_input("Folio N° *", value=p_pdf_folio)
-                    cot_empresa = st.text_input("Empresa (Cliente) *", value=sug_empresa)
-                    cot_rut = st.text_input("RUT Cliente *", value=p_pdf_rut)
-                    cot_planta = st.text_input("Planta / Sucursal", value=sug_planta)
+                    cot_folio = st.text_input("Folio N° *", value=st.session_state["cot_folio"])
+                    cot_empresa = st.text_input("Empresa (Cliente) *", value=st.session_state["cot_empresa"])
+                    cot_rut = st.text_input("RUT Cliente *", value=st.session_state["cot_rut"])
+                    cot_planta = st.text_input("Planta / Sucursal", value=st.session_state["cot_planta"])
                 
                 with c_head2:
-                    cot_contacto = st.text_input("Nombre Contacto Cliente", value=sug_nombre)
-                    cot_email_cont = st.text_input("Email Contacto", value=sug_email)
-                    cot_fono_cont = st.text_input("Fono Contacto", value=sug_fono)
+                    cot_contacto = st.text_input("Nombre Contacto Cliente", value=st.session_state["cot_contacto"])
+                    cot_email_cont = st.text_input("Email Contacto", value=st.session_state["cot_email_cont"])
+                    cot_fono_cont = st.text_input("Fono Contacto", value=st.session_state["cot_fono_cont"])
                     cot_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"])
 
                 with c_head3:
-                    cot_ejecutivo = st.text_input("Ejecutivo Comercial", value=p_pdf_ejecutivo)
-                    cot_email_ejec = st.text_input("Email Ejecutivo", value=p_pdf_email_ejec)
-                    cot_fono_ejec = st.text_input("Fono Ejecutivo", value=p_pdf_fono_ejec)
+                    cot_ejecutivo = st.text_input("Ejecutivo Comercial", value=st.session_state["cot_ejecutivo"])
+                    cot_email_ejec = st.text_input("Email Ejecutivo", value=st.session_state["cot_email_ejec"])
+                    cot_fono_ejec = st.text_input("Fono Ejecutivo", value=st.session_state["cot_fono_ejec"])
                     
                     c_f1, c_f2 = st.columns(2)
-                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=p_pdf_fecha_emi)
-                    cot_f_val = c_f2.date_input("Válido Hasta", value=p_pdf_fecha_val)
+                    cot_f_emi = c_f1.date_input("Fecha Emisión", value=st.session_state["cot_fecha_emi"])
+                    cot_f_val = c_f2.date_input("Válido Hasta", value=st.session_state["cot_fecha_val"])
 
                 st.divider()
                 st.subheader("2. Glosa Descriptiva del Servicio")
-                cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", value=p_pdf_glosa)
+                cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", value=st.session_state["cot_glosa"])
 
                 st.divider()
                 st.subheader("3. Detalle por Sección / Items Cotizados")
@@ -1263,11 +1263,11 @@ if check_password():
                 cot_grupo_serv = st.selectbox("Grupo de Servicio", options=servicios_exist, key="cot_grupo_serv_sel")
                 
                 det_col0, det_col1, det_col2, det_col3, det_col4 = st.columns([1.5, 1, 1, 4, 2])
-                cot_moneda = det_col0.selectbox("Moneda *", ["CLP", "USD"], index=0 if p_pdf_moneda == "CLP" else 1, key="cot_moneda_select_new")
+                cot_moneda = det_col0.selectbox("Moneda *", ["CLP", "USD"], index=0 if st.session_state["cot_moneda"] == "CLP" else 1, key="cot_moneda_select_new")
                 cot_cant = det_col1.number_input("Cant.", min_value=1, value=1)
                 cot_uni = det_col2.text_input("Unid.", value="SC")
-                cot_detalle = det_col3.text_input("Detalle del Servicio", value=p_pdf_detalle)
-                cot_neto = det_col4.number_input("Valor Neto", min_value=0, step=100 if cot_moneda == "USD" else 1000, value=p_pdf_neto)
+                cot_detalle = det_col3.text_input("Detalle del Servicio", value=st.session_state["cot_detalle"])
+                cot_neto = det_col4.number_input("Valor Neto", min_value=0, step=100 if cot_moneda == "USD" else 1000, value=st.session_state["cot_neto"])
 
                 calc_iva = int(round(cot_neto * 0.19))
                 calc_total = cot_neto + calc_iva
@@ -1293,8 +1293,8 @@ if check_password():
                             "Fono_Ejecutivo": cot_fono_ejec.strip(),
                             "Condicion_Pago": cot_condicion,
                             "Moneda": cot_moneda,
-                            "Fecha_Emision": str(cot_f_emi),
-                            "Fecha_Validez": str(cot_f_val),
+                            "Fecha_Emision": str(cot_f_emi) if cot_f_emi else None,
+                            "Fecha_Validez": str(cot_f_val) if cot_f_val else None,
                             "Glosa": cot_glosa.strip(),
                             "Grupo_Servicio": cot_grupo_serv.upper(),
                             "Detalle_Servicio": cot_detalle.strip().upper(),
@@ -1388,8 +1388,8 @@ if check_password():
                                 "Fono_Ejecutivo": ec_fono_ejec.strip(),
                                 "Condicion_Pago": ec_condicion,
                                 "Moneda": ec_moneda,
-                                "Fecha_Emision": str(ec_f_emi),
-                                "Fecha_Validez": str(ec_f_val),
+                                "Fecha_Emision": str(ec_f_emi) if ec_f_emi else None,
+                                "Fecha_Validez": str(ec_f_val) if ec_f_val else None,
                                 "Glosa": ec_glosa.strip(),
                                 "Grupo_Servicio": ec_grupo_serv.upper(),
                                 "Detalle_Servicio": ec_detalle.strip().upper(),
@@ -1763,7 +1763,7 @@ if check_password():
                         
                         try:
                             supabase.table("ingresos").upsert(nuevo_registro_supa, on_conflict="Factura").execute()
-                            st.cache_data.clear() # Limpia la caché para obligar a leer los datos recién guardados
+                            st.cache_data.clear()
                             
                             if cot_seleccionada != "--- Sin Enlace ---":
                                 marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
@@ -1886,7 +1886,7 @@ if check_password():
 
                             try:
                                 supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
-                                st.cache_data.clear() # Limpia la caché tras la edición
+                                st.cache_data.clear()
                                 st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
                             except Exception as e:
                                 st.error(f"Error al actualizar la factura en Supabase: {e}")
