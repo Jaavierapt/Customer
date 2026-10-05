@@ -51,7 +51,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def cargar_datos():
     """Consulta todos los registros de la tabla 'ingresos' en Supabase y los depura con seguridad."""
     response = supabase.table("ingresos").select("*").execute()
@@ -130,6 +130,7 @@ def eliminar_factura(numero_factura):
     """Elimina una factura directamente desde Supabase."""
     try:
         supabase.table("ingresos").delete().eq("Factura", str(numero_factura)).execute()
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Error al eliminar la factura: {e}")
@@ -1305,8 +1306,8 @@ if check_password():
                             "Estado": "PENDIENTE"
                         }
                         guardar_cotizacion(dict_guardar)
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente y contacto sincronizado en la nube!")
-                        st.rerun()
+                        st.cache_data.clear()
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente!")
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
 
@@ -1400,8 +1401,8 @@ if check_password():
                                 "Estado": ec_estado
                             }
                             guardar_cotizacion(dict_editado)
+                            st.cache_data.clear()
                             st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente!")
-                            st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para editar.")
 
@@ -1416,8 +1417,8 @@ if check_password():
                     
                     if st.button(f"🔥 Confirmar y Eliminar Cotización #{folio_cot_del}", key="btn_confirm_del_cot"):
                         eliminar_cotizacion(folio_cot_del)
+                        st.cache_data.clear()
                         st.success(f"Cotización Folio #{folio_cot_del} eliminada con éxito de Supabase.")
-                        st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para eliminar.")
 
@@ -1717,11 +1718,7 @@ if check_password():
 
                 with fc2:
                     n_estado_pago = st.selectbox("Estado de Pago", ["PENDIENTE", "Pagado"])
-                    if n_estado_pago == "Pagado":
-                        n_f_pago = st.date_input("Fecha de Pago", value=None)
-                    else:
-                        n_f_pago = st.date_input("Fecha de Pago", value=None)
-                        
+                    n_f_pago = st.date_input("Fecha de Pago", value=None)
                     n_f_cot = st.date_input("Fecha Cotización", value=st.session_state["doc_fecha_cot"])
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
                     n_f_emi = st.date_input("Fecha Emisión", value=st.session_state["doc_fecha_emi"])
@@ -1732,14 +1729,15 @@ if check_password():
                 
                 if st.form_submit_button("💾 Guardar y Sincronizar en la Nube"):
                     if n_factura.strip() != "" and n_empresa_ins.strip() != "":
-                        fecha_pago_final = pd.to_datetime(n_f_pago) if (n_estado_pago == "Pagado" and n_f_pago) else None
+                        fecha_pago_final = str(n_f_pago) if n_f_pago else None
                         
-                        if pd.notna(fecha_pago_final):
-                            anio_val = int(fecha_pago_final.year)
-                            mes_val = int(fecha_pago_final.month)
-                        else:
-                            anio_val = None
-                            mes_val = None
+                        anio_val = None
+                        mes_val = None
+                        if fecha_pago_final:
+                            dt_pago = pd.to_datetime(fecha_pago_final, errors='coerce')
+                            if pd.notna(dt_pago):
+                                anio_val = int(dt_pago.year)
+                                mes_val = int(dt_pago.month)
 
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
@@ -1755,7 +1753,7 @@ if check_password():
                             "Fecha_Emision": str(n_f_emi) if n_f_emi else None,
                             "Fecha_Vencimiento": str(n_f_venc) if n_f_venc else None,
                             "Fecha_GES": str(n_f_ges) if n_f_ges else None,
-                            "Fecha_Pago": str(fecha_pago_final) if fecha_pago_final else None,
+                            "Fecha_Pago": fecha_pago_final,
                             "Semaforo": "",
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
@@ -1765,6 +1763,7 @@ if check_password():
                         
                         try:
                             supabase.table("ingresos").upsert(nuevo_registro_supa, on_conflict="Factura").execute()
+                            st.cache_data.clear() # Limpia la caché para obligar a leer los datos recién guardados
                             
                             if cot_seleccionada != "--- Sin Enlace ---":
                                 marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
@@ -1780,7 +1779,6 @@ if check_password():
                                 )
                             
                             st.success(f"¡Factura #{n_factura} guardada y sincronizada exitosamente!")
-                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
                     else:
@@ -1801,10 +1799,6 @@ if check_password():
                             except:
                                 return None
                         return None
-
-                    def safe_date_str(val):
-                        d = safe_date_val(val)
-                        return str(d) if d else None
 
                     with st.form(f"form_editar_factura_{factura_a_editar}"):
                         e_col1, e_col2 = st.columns(2)
@@ -1855,20 +1849,20 @@ if check_password():
                             e_f_pago = st.date_input("Fecha de Pago", value=safe_date_val(row_edit.get('Fecha_Pago')), key=f"e_fpago_{factura_a_editar}")
 
                         if st.form_submit_button("💾 Actualizar Factura en Supabase"):
-                            f_cot_final = str(e_f_cot) if e_f_cot else safe_date_str(row_edit.get('Fecha_Cotizacion'))
-                            f_oc_final = str(e_f_oc) if e_f_oc else safe_date_str(row_edit.get('Fecha_OC'))
-                            f_emi_final = str(e_f_emi) if e_f_emi else safe_date_str(row_edit.get('Fecha_Emision'))
-                            f_venc_final = str(e_f_venc) if e_f_venc else safe_date_str(row_edit.get('Fecha_Vencimiento'))
-                            f_ges_final = str(e_f_ges) if e_f_ges else safe_date_str(row_edit.get('Fecha_GES'))
-                            f_pago_final = str(e_f_pago) if e_f_pago else safe_date_str(row_edit.get('Fecha_Pago'))
+                            f_cot_final = str(e_f_cot) if e_f_cot else None
+                            f_oc_final = str(e_f_oc) if e_f_oc else None
+                            f_emi_final = str(e_f_emi) if e_f_emi else None
+                            f_venc_final = str(e_f_venc) if e_f_venc else None
+                            f_ges_final = str(e_f_ges) if e_f_ges else None
+                            f_pago_final = str(e_f_pago) if e_f_pago else None
 
-                            if f_pago_final and pd.notna(pd.to_datetime(f_pago_final, errors='coerce')):
-                                dt_p = pd.to_datetime(f_pago_final)
-                                anio_val = int(dt_p.year)
-                                mes_val = int(dt_p.month)
-                            else:
-                                anio_val = None
-                                mes_val = None
+                            anio_val = None
+                            mes_val = None
+                            if f_pago_final:
+                                dt_p = pd.to_datetime(f_pago_final, errors='coerce')
+                                if pd.notna(dt_p):
+                                    anio_val = int(dt_p.year)
+                                    mes_val = int(dt_p.month)
 
                             registro_actualizado = {
                                 "Empresa": e_empresa.strip().upper(),
@@ -1892,8 +1886,8 @@ if check_password():
 
                             try:
                                 supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
+                                st.cache_data.clear() # Limpia la caché tras la edición
                                 st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
-                                st.rerun()
                             except Exception as e:
                                 st.error(f"Error al actualizar la factura en Supabase: {e}")
             else:
@@ -1910,8 +1904,8 @@ if check_password():
                     
                     if st.button(f"🔥 Confirmar y Eliminar Factura #{factura_a_eliminar}", key="btn_confirm_del_factura"):
                         if eliminar_factura(factura_a_eliminar):
+                            st.cache_data.clear()
                             st.success(f"Factura #{factura_a_eliminar} eliminada exitosamente de Supabase.")
-                            st.rerun()
             else:
                 st.info("No hay facturas registradas para eliminar.")
 
@@ -2015,9 +2009,8 @@ if check_password():
                         supabase.table("ingresos").update({"Estado": nuevo_est}).eq("Factura", fac_num).execute()
                     except Exception as e:
                         st.error(f"Error al actualizar factura {fac_num}: {e}")
+                st.cache_data.clear()
                 st.success("¡Estados actualizados exitosamente en Supabase!")
-                st.session_state["active_tab"] = 4
-                st.rerun()
 
         st.divider()
 
@@ -2092,9 +2085,8 @@ if check_password():
                 if submitted:
                     if (nombre or empresa):
                         guardar_contacto(nombre, correo, estado, celular, empresa, planta, valor, rol)
+                        st.cache_data.clear()
                         st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
-                        st.session_state["active_tab"] = 5
-                        st.rerun()
                     else:
                         st.warning("Por favor completa al menos el Nombre o Empresa.")
       
@@ -2183,9 +2175,8 @@ if check_password():
                                     rol=qe_rol,
                                     bitacora=str(row.get('Bitacora', ''))
                                 )
+                                st.cache_data.clear()
                                 st.success("¡Tarjeta actualizada en la nube!")
-                                st.session_state["active_tab"] = 5
-                                st.rerun()
 
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
@@ -2211,8 +2202,8 @@ if check_password():
                                         tipo=tipo_inter,
                                         detalle=detalle_inter
                                     )
+                                    st.cache_data.clear()
                                     st.success("¡Interacción registrada en la nube!")
-                                    st.rerun()
                                 else:
                                     st.warning("Escribe un detalle para la interacción.")
                        
@@ -2245,8 +2236,8 @@ if check_password():
                                     tipo="Nota / Bitácora",
                                     detalle=nueva_nota[:80] + "..."
                                 )
+                                st.cache_data.clear()
                                 st.success("¡Bitácora sincronizada en Supabase!")
-                                st.rerun()
                         with col_b2:
                             nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
                             if nuevo_estado_rapido != row['Estado']:
@@ -2261,7 +2252,7 @@ if check_password():
                                     rol=row.get('Rol_Contacto', 'Influenciador'),
                                     bitacora=nota_actual
                                 )
-                                st.rerun()
+                                st.cache_data.clear()
 
                     with st.expander(f"⏱ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
                         filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row.get('Nombre')]
@@ -2273,8 +2264,7 @@ if check_password():
 
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
                         eliminar_contacto(correo_contacto)
-                        st.session_state["active_tab"] = 5
-                        st.rerun()
+                        st.cache_data.clear()
 
         st.divider()
 
@@ -2429,8 +2419,8 @@ if check_password():
                         }
                         
                         guardar_ticket(dict_tk)
+                        st.cache_data.clear()
                         st.success(f"¡Ticket #{nuevo_id} registrado y publicado globalmente!")
-                        st.rerun()
                     else:
                         st.warning("Escribe un asunto para el ticket.")
 
@@ -2482,8 +2472,8 @@ if check_password():
                                 "Creado_Por": str(row_tk_edit.get('Creado_Por', 'Sistema'))
                             }
                             guardar_ticket(dict_tk_edit)
+                            st.cache_data.clear()
                             st.success(f"¡Ticket #{id_tk_editar} actualizado exitosamente!")
-                            st.rerun()
             else:
                 st.info("No hay tickets registrados para editar.")
 
@@ -2496,8 +2486,8 @@ if check_password():
                     st.warning(f"⚠️ ¿Eliminar permanentemente el Ticket **#{id_tk_del}** ({row_tk_d.get('Asunto', 'N/A')})?")
                     if st.button(f"🔥 Confirmar y Eliminar Ticket #{id_tk_del}", key="btn_confirm_del_tk"):
                         eliminar_ticket(id_tk_del)
+                        st.cache_data.clear()
                         st.success(f"Ticket #{id_tk_del} eliminado correctamente.")
-                        st.rerun()
             else:
                 st.info("No hay tickets registrados para eliminar.")
 
@@ -2540,6 +2530,5 @@ if check_password():
                             rol=n_rol,
                             bitacora=str(row.get('Bitacora', ''))
                         )
+                        st.cache_data.clear()
                         st.success("¡Contacto actualizado con éxito en Supabase!")
-                        st.session_state["active_tab"] = 5
-                        st.rerun()
