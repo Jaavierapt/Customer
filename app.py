@@ -51,20 +51,108 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-@st.cache_data(ttl=30)
-def cargar_datos():
-    """Consulta todos los registros de la tabla 'ingresos' en Supabase y los depura con seguridad."""
-    response = supabase.table("ingresos").select("*").execute()
-    data = response.data
+@st.cache_data(ttl=5)
+def cargar_contactos():
+    """Consulta los contactos desde Supabase e independiza mayúsculas/minúsculas."""
+    try:
+        response = supabase.table("Contactos").select("*").execute()
+        if response.data:
+            df_c = pd.DataFrame(response.data)
+            
+            # Normalización de columnas para que coincida siempre con el CRM
+            col_map = {
+                "nombre": "Nombre", "Nombre": "Nombre",
+                "Correo": "Correo", "email": "Correo", "Email": "Correo",
+                "estado": "Estado", "Estado": "Estado",
+                "telefono": "Celular", "Celular": "Celular",
+                "empresa": "Empresa", "Empresa": "Empresa",
+                "planta": "Planta", "Planta": "Planta",
+                "valor": "Valor", "Valor": "Valor",
+                "rol": "Rol_Contacto", "Rol_Contacto": "Rol_Contacto"
+            }
+            df_c = df_c.rename(columns={k: v for k, v in col_map.items() if k in df_c.columns})
+
+            for col_req in ["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]:
+                if col_req not in df_c.columns:
+                    df_c[col_req] = ""
+
+            # Homologación de estados para que aparezcan en las columnas del embudo
+            def mapear_estado(e):
+                e_str = str(e).strip().capitalize()
+                if e_str in ["Pendiente", "Propuesta", "Cotizado"]:
+                    return "Propuesta"
+                elif e_str in ["Ganado", "Aprobada", "Aprobado"]:
+                    return "Ganado"
+                elif e_str in ["Perdido", "Rechazada", "Rechazado"]:
+                    return "Perdido"
+                elif e_str in ["Prospecto", "Contactado"]:
+                    return e_str
+                elif e_str in ["Finalizado / archivo histórico", "Finalizado"]:
+                    return "Finalizado / Archivo Histórico"
+                return "Propuesta"
+
+            df_c["Estado"] = df_c["Estado"].apply(mapear_estado)
+            return df_c
+    except Exception as e:
+        st.error(f"Error al cargar contactos desde Supabase: {e}")
+
+    return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"])
+
+
+def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
+    """Guarda o actualiza el contacto en Supabase de forma directa y flexible."""
+    nom_final = str(nombre).strip()
+    if not nom_final:
+        nom_final = str(empresa).strip().upper() if empresa else "CONTACTO NUEVO"
+
+    email_clean = str(email).strip().lower()
+    if not email_clean or "@" not in email_clean:
+        slug_nom = nom_final.lower().replace(" ", ".")
+        slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
+        email_clean = f"{slug_nom}@{slug_emp}.local"
+
+    # Mapeo universal de estado
+    estado_normalizado = "Propuesta"
+    if str(estado).upper() in ["GANADO", "APROBADA"]:
+        estado_normalizado = "Ganado"
+    elif str(estado).upper() in ["PERDIDO", "RECHAZADA"]:
+        estado_normalizado = "Perdido"
+    elif str(estado).strip() in ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido", "Finalizado / Archivo Histórico"]:
+        estado_normalizado = str(estado).strip()
+
+    # Se envían solo las columnas estándar para evitar errores de schema cache
+    datos_contacto = {
+        "Nombre": nom_final,
+        "Empresa": str(empresa).strip().upper(),
+        "Planta": str(planta).strip().upper(),
+        "Correo": email_clean,
+        "Celular": str(telefono).strip(),
+        "Estado": estado_normalizado,
+        "Valor": int(valor) if valor else 0,
+        "Rol_Contacto": str(rol).strip() if rol else "Influenciador"
+    }
+
+    try:
+        supabase.table("Contactos").upsert(datos_contacto).execute()
+        st.cache_data.clear()
+    except Exception as e:
+        # Fallback en caso de que en la BD las columnas estén con nombres en minúscula
+        try:
+            datos_min = {
+                "nombre": nom_final,
+                "empresa": str(empresa).strip().upper(),
+                "planta": str(planta).strip().upper(),
+                "email": email_clean,
+                "telefono": str(telefono).strip(),
+                "estado": estado_normalizado,
+                "valor": int(valor) if valor else 0,
+                "rol": str(rol).strip() if rol else "Influenciador"
+            }
+            supabase.table("Contactos").upsert(datos_min).execute()
+            st.cache_data.clear()
+        except Exception as ex_fail:
+            st.error(f"Error final al sincronizar contacto en Supabase: {ex_fail}")
     
-    if not data:
-        return pd.DataFrame(columns=[
-            "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
-            "Monto", "Moneda", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
-            "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
-        ])
-        
     df = pd.DataFrame(data)
     df.columns = df.columns.str.strip()
     
