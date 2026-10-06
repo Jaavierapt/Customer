@@ -176,7 +176,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura inicial de pruebas."""
+    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura existente."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -201,18 +201,31 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         "email": email_clean,
         "estado": str(estado).strip() if estado else "Propuesta",
         "telefono": str(telefono).strip(),
-        "empresa": str(empresa).strip().upper(),
-        "planta": str(planta).strip().upper(),
         "valor": int(valor) if valor else 0,
         "rol": str(rol).strip() if rol else "Influenciador",
         "bitacora": str(bitacora)
     }
     
+    # Manejo seguro de campo de empresa y planta según esquema de Supabase
+    if empresa:
+        registro_supa["Empresa"] = str(empresa).strip().upper()
+    if planta:
+        registro_supa["Planta"] = str(planta).strip().upper()
+
     try:
         supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
         st.cache_data.clear()
     except Exception as e:
-        st.error(f"Error al guardar contacto en Supabase: {e}")
+        # Fallback en caso de variación de mayúsculas/minúsculas en Supabase
+        try:
+            if "Empresa" in registro_supa:
+                registro_supa["empresa"] = registro_supa.pop("Empresa")
+            if "Planta" in registro_supa:
+                registro_supa["planta"] = registro_supa.pop("Planta")
+            supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
+            st.cache_data.clear()
+        except Exception as e2:
+            st.error(f"Error al guardar contacto en Supabase: {e2}")
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
@@ -348,7 +361,7 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y sincroniza SIEMPRE el contacto en la base de datos."""
+    """Guarda o actualiza cotización en Supabase y sincroniza el contacto en la base de datos."""
     try:
         supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
         st.cache_data.clear()
@@ -920,7 +933,7 @@ if check_password():
                 df_c_planta = df_cotizaciones[(df_cotizaciones['Empresa'].str.upper() == empresa_sel.upper()) & (df_cotizaciones['Planta'].str.upper() == planta_sel.upper())]
                 if not df_c_planta.empty:
                     st.dataframe(
-                        df_c_planta[["Folio", "Contacto", "Fecha_Emision", "Moneda", "Grupo_Servicio", "Detalle_Servicio", "Monto_Total", "Estado"]],
+                        df_c_planta[["Folio", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Detalle_Servicio", "Monto_Total", "Estado"]],
                         use_container_width=True,
                         hide_index=True
                     )
@@ -1156,7 +1169,7 @@ if check_password():
                                 except:
                                     pass
 
-                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
+                            m_f_val = re.search(r'(?:V[aá]lido\s*Hasta|Validez|Vencimiento)\s*[:#]?\s*(\d{4}[\/\.-]\d{1,2}[\/\.-]\d{1,2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4}|\d{1,2}[\/\.-]\d{4})', texto_extraido, re.IGNORECASE)
                             if m_f_val:
                                 try:
                                     str_fv = m_f_val.group(1).replace('/', '-').replace('.', '-')
@@ -1273,7 +1286,7 @@ if check_password():
                     
                     c_f1, c_f2 = st.columns(2)
                     cot_f_emi = c_f1.date_input("Fecha Emisión", value=st.session_state["cot_fecha_emi"])
-                    cot_f_val = c_f2.date_input("Válido Hasta", value=st.session_state["cot_fecha_val"])
+                    cot_f_val = c_f2.date_input("Válido Hasta (Validez Cotización)", value=st.session_state["cot_fecha_val"])
 
                 st.divider()
                 st.subheader("2. Glosa Descriptiva del Servicio")
@@ -1373,7 +1386,7 @@ if check_password():
                             ec_email_ejec = st.text_input("Email Ejecutivo", value=str(row_c_edit.get('Email_Ejecutivo', '')))
                             ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
                             ec_f_emi = st.date_input("Fecha Emisión", value=parse_date_dynamic(row_c_edit.get('Fecha_Emision'), None))
-                            ec_f_val = st.date_input("Válido Hasta", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), None))
+                            ec_f_val = st.date_input("Válido Hasta (Validez Cotización)", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), None))
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
                         
@@ -1453,13 +1466,17 @@ if check_password():
             if 'Moneda' not in df_cot_disp.columns:
                 df_cot_disp['Moneda'] = 'CLP'
             df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
+            if 'Fecha_Validez' in df_cot_disp.columns:
+                df_cot_disp['Fecha_Validez'] = df_cot_disp['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
                 
+            cols_cot_show = [c for c in ["Folio", "Empresa", "Planta", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"] if c in df_cot_disp.columns]
             st.dataframe(
-                df_cot_disp[["Folio", "Empresa", "Planta", "Contacto", "Fecha_Emision", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"]],
+                df_cot_disp[cols_cot_show],
                 column_config={
                     "Monto_Neto": st.column_config.NumberColumn("Monto Neto", format="%d"),
                     "Monto_Total": st.column_config.NumberColumn("Total", format="%d"),
-                    "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión")
+                    "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión"),
+                    "Fecha_Validez": st.column_config.TextColumn("Válido Hasta")
                 },
                 use_container_width=True,
                 hide_index=True
@@ -1503,7 +1520,7 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
@@ -1759,8 +1776,8 @@ if check_password():
                     n_f_pago = st.date_input("Fecha de Pago", value=None)
                     n_f_cot = st.date_input("Fecha Cotización", value=st.session_state["doc_fecha_cot"])
                     n_f_oc = st.date_input("Fecha Orden de Compra", value=None)
-                    n_f_emi = st.date_input("Fecha Emisión", value=st.session_state["doc_fecha_emi"])
-                    n_f_venc = st.date_input("Fecha Vencimiento", value=st.session_state["doc_fecha_venc"])
+                    n_f_emi = st.date_input("Fecha Emisión Factura", value=st.session_state["doc_fecha_emi"])
+                    n_f_venc = st.date_input("Fecha Vencimiento Factura", value=st.session_state["doc_fecha_venc"])
                     
                     n_f_ges = st.date_input("Fecha GES (si aplica)", value=None)
                     n_req_ges = st.selectbox("¿Requiere GES?", ["No", "Sí"], key="n_req_ges_input")
@@ -1876,8 +1893,8 @@ if check_password():
                             
                             e_f_cot = st.date_input("Fecha Cotización", value=safe_date_val(row_edit.get('Fecha_Cotizacion')), key=f"e_fcot_{factura_a_editar}")
                             e_f_oc = st.date_input("Fecha Orden de Compra", value=safe_date_val(row_edit.get('Fecha_OC')), key=f"e_foc_{factura_a_editar}")
-                            e_f_emi = st.date_input("Fecha Emisión", value=safe_date_val(row_edit.get('Fecha_Emision')), key=f"e_femi_{factura_a_editar}")
-                            e_f_venc = st.date_input("Fecha Vencimiento", value=safe_date_val(row_edit.get('Fecha_Vencimiento')), key=f"e_fvenc_{factura_a_editar}")
+                            e_f_emi = st.date_input("Fecha Emisión Factura", value=safe_date_val(row_edit.get('Fecha_Emision')), key=f"e_femi_{factura_a_editar}")
+                            e_f_venc = st.date_input("Fecha Vencimiento Factura", value=safe_date_val(row_edit.get('Fecha_Vencimiento')), key=f"e_fvenc_{factura_a_editar}")
                             
                             req_ges_act = str(row_edit.get('Requiere_GES', 'No'))
                             idx_ges = 1 if req_ges_act == "Sí" else 0
@@ -1938,7 +1955,7 @@ if check_password():
                 
                 if factura_a_eliminar:
                     row_f_del = df[df['Factura'].astype(str) == str(factura_a_eliminar)].iloc[0]
-                    st.warning(f"⚠️ ¿Estás seguro de que deseas eliminar permanentemente la Factura N° **#{factura_a_eliminar}** de la empresa **{row_f_del.get('Empresa', 'N/A')}**?")
+                    st.warning(f"⚠️️ ¿Estás seguro de que deseas eliminar permanentemente la Factura N° **#{factura_a_eliminar}** de la empresa **{row_f_del.get('Empresa', 'N/A')}**?")
                     
                     if st.button(f"🔥 Confirmar y Eliminar Factura #{factura_a_eliminar}", key="btn_confirm_del_factura"):
                         if eliminar_factura(factura_a_eliminar):
@@ -2002,8 +2019,8 @@ if check_password():
                     with dc2:
                         st.markdown(f"**Fecha Cotización:** {str(row_det.get('Fecha_Cotizacion', 'N/A')).split(' ')[0]}")
                         st.markdown(f"**Fecha Orden de Compra (OC):** {str(row_det.get('Fecha_OC', 'N/A')).split(' ')[0]}")
-                        st.markdown(f"**Fecha Emisión:** {str(row_det.get('Fecha_Emision', 'N/A')).split(' ')[0]}")
-                        st.markdown(f"**Fecha de Vencimiento:** {str(row_det.get('Fecha_Vencimiento', 'N/A')).split(' ')[0]}")
+                        st.markdown(f"**Fecha Emisión Factura:** {str(row_det.get('Fecha_Emision', 'N/A')).split(' ')[0]}")
+                        st.markdown(f"**Fecha Vencimiento Factura:** {str(row_det.get('Fecha_Vencimiento', 'N/A')).split(' ')[0]}")
                          
                     with dc3:
                         f_pago_str = str(f_pago_val).split(' ')[0] if pd.notna(f_pago_val) else "Pendiente de pago"
@@ -2543,7 +2560,7 @@ if check_password():
 
         st.divider()
 
-        with st.expander("✏️️ Editar contactos existentes"):
+        with st.expander("✏ Editar contactos existentes"):
             for idx, row in df_contactos.iterrows():
                 with st.form(f"edit_{idx}"):
                     st.write(f"Editando: {row['Nombre']}")
