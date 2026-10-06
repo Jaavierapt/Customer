@@ -182,7 +182,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
-    """Guarda o actualiza el contacto en Supabase de forma directa y flexible."""
+    """Guarda o actualiza el contacto en Supabase garantizando compatibilidad de nombres de columnas."""
     nom_final = str(nombre).strip()
     if not nom_final:
         nom_final = str(empresa).strip().upper() if empresa else "CONTACTO NUEVO"
@@ -201,36 +201,43 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     elif str(estado).strip() in ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido", "Finalizado / Archivo Histórico"]:
         estado_normalizado = str(estado).strip()
 
-    datos_contacto = {
-        "Nombre": nom_final,
-        "Empresa": str(empresa).strip().upper(),
-        "Planta": str(planta).strip().upper(),
-        "Correo": email_clean,
-        "Celular": str(telefono).strip(),
-        "Estado": estado_normalizado,
-        "Valor": int(valor) if valor else 0,
-        "Rol_Contacto": str(rol).strip() if rol else "Influenciador"
+    # Estructura principal en minúsculas (soporte estándar de la BD en Supabase)
+    datos_contacto_min = {
+        "nombre": nom_final,
+        "empresa": str(empresa).strip().upper(),
+        "planta": str(planta).strip().upper() if planta else "SIN PLANTA",
+        "telefono": str(telefono).strip(),
+        "estado": estado_normalizado,
+        "valor": int(valor) if valor else 0,
+        "rol": str(rol).strip() if rol else "Influenciador"
     }
 
     try:
-        supabase.table("Contactos").upsert(datos_contacto).execute()
+        # 1. Intentar upsert con clave "nombre"
+        datos_con_nom = datos_contacto_min.copy()
+        datos_con_nom["nombre"] = nom_final
+        supabase.table("Contactos").upsert(datos_con_nom, on_conflict="nombre").execute()
         st.cache_data.clear()
+        return True
     except Exception:
         try:
-            datos_min = {
-                "nombre": nom_final,
-                "empresa": str(empresa).strip().upper(),
-                "planta": str(planta).strip().upper(),
-                "email": email_clean,
-                "telefono": str(telefono).strip(),
-                "estado": estado_normalizado,
-                "valor": int(valor) if valor else 0,
-                "rol": str(rol).strip() if rol else "Influenciador"
+            # 2. Intentar upsert con clave "Correo" en mayúscula/español
+            datos_mayus = {
+                "Nombre": nom_final,
+                "Empresa": str(empresa).strip().upper(),
+                "Planta": str(planta).strip().upper() if planta else "SIN PLANTA",
+                "Correo": email_clean,
+                "Celular": str(telefono).strip(),
+                "Estado": estado_normalizado,
+                "Valor": int(valor) if valor else 0,
+                "Rol_Contacto": str(rol).strip() if rol else "Influenciador"
             }
-            supabase.table("Contactos").upsert(datos_min).execute()
+            supabase.table("Contactos").upsert(datos_mayus).execute()
             st.cache_data.clear()
-        except Exception:
-            pass
+            return True
+        except Exception as err:
+            st.warning(f"No se pudo guardar el contacto automáticamente en la tabla Contactos: {err}")
+            return False
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
@@ -371,7 +378,7 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y sincroniza el contacto en el Embudo de Ventas."""
+    """Guarda o actualiza cotización en Supabase y sincroniza obligatoriamente el contacto en el Embudo."""
     try:
         supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
         st.cache_data.clear()
@@ -384,16 +391,17 @@ def guardar_cotizacion(dict_cot):
     em_c = dict_cot.get("Email_Contacto", "").strip()
     monto_total = dict_cot.get("Monto_Total", 0)
     
-    nombre_contacto_final = nom_c if nom_c else (f"{emp_c} ({planta_c})" if planta_c else emp_c)
+    nombre_contacto_final = nom_c if nom_c else (f"Contacto {emp_c}" if emp_c else "Contacto Cotización")
     
-    estado_cot = dict_cot.get("Estado", "PENDIENTE").upper()
+    estado_cot = str(dict_cot.get("Estado", "PENDIENTE")).upper()
     if estado_cot in ["GANADO", "APROBADA"]:
         estado_contacto = "Ganado"
-    elif estado_cot == "RECHAZADA":
+    elif estado_cot in ["RECHAZADA", "PERDIDO"]:
         estado_contacto = "Perdido"
     else:
         estado_contacto = "Propuesta"
     
+    # Sincronización asegurada de la tarjeta de contacto
     guardar_contacto(
         nombre=nombre_contacto_final,
         email=em_c,
@@ -422,7 +430,7 @@ def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
             row_c = df_cot.loc[idx_c[0]]
             nom_c = str(row_c.get("Contacto", "")).strip()
             em_c = str(row_c.get("Email_Contacto", "")).strip()
-            nombre_contacto_final = nom_c if nom_c else f"{empresa} ({planta})"
+            nombre_contacto_final = nom_c if nom_c else f"Contacto {empresa}"
                 
             guardar_contacto(
                 nombre=nombre_contacto_final,
