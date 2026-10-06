@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from supabase import create_client, Client
 import streamlit as st
 
-# Importación ultra-robusta de librerías para lectura de PDF
+# Importación ultra-robusta de librerías para lectura de PDF (Priorizando pdfplumber)
 PDF_READER_AVAILABLE = False
 try:
     import pdfplumber
@@ -108,17 +108,17 @@ def cargar_datos():
     df['Año'] = df['Fecha_Pago'].dt.year
     df['Mes'] = df['Fecha_Pago'].dt.month
 
-    df['Empresa'] = df['Empresa'].astype(str).str.strip().str.upper()
-    df['Planta'] = df['Planta'].fillna('SIN PLANTA').astype(str).str.strip().str.upper()
+    df['Empresa'] = df['Empresa'].fillna('').astype(str).str.strip().str.upper()
+    df['Planta'] = df['Planta'].fillna('').astype(str).str.strip().str.upper()
     
     if 'Grupo_Servicio' in df.columns:
-        df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+        df['Grupo Servicio'] = df['Grupo_Servicio'].fillna('').astype(str).str.strip().str.upper()
     elif 'Grupo Servicio' in df.columns:
-        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('SIN SERVICIO').astype(str).str.strip().str.upper()
+        df['Grupo Servicio'] = df['Grupo Servicio'].fillna('').astype(str).str.strip().str.upper()
     else:
-        df['Grupo Servicio'] = 'SIN SERVICIO'
+        df['Grupo Servicio'] = ''
         
-    df['Servicio'] = df['Servicio'].fillna('SIN DETALLE').astype(str).str.strip().str.upper()
+    df['Servicio'] = df['Servicio'].fillna('').astype(str).str.strip().str.upper()
     
     if 'Factura' in df.columns:
         df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
@@ -136,123 +136,93 @@ def eliminar_factura(numero_factura):
         st.error(f"Error al eliminar la factura: {e}")
         return False
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=30)
 def cargar_contactos():
-    """Consulta los contactos desde Supabase e independiza mayúsculas/minúsculas."""
+    """Consulta los contactos directamente desde Supabase sin depender de archivos CSV locales."""
     try:
         response = supabase.table("Contactos").select("*").execute()
         if response.data:
             df_c = pd.DataFrame(response.data)
-            
             col_map = {
-                "nombre": "Nombre", "Nombre": "Nombre",
-                "Correo": "Correo", "email": "Correo", "Email": "Correo",
-                "estado": "Estado", "Estado": "Estado",
-                "telefono": "Celular", "Celular": "Celular",
-                "empresa": "Empresa", "Empresa": "Empresa",
-                "planta": "Planta", "Planta": "Planta",
-                "valor": "Valor", "Valor": "Valor",
-                "rol": "Rol_Contacto", "Rol_Contacto": "Rol_Contacto"
+                "nombre": "Nombre",
+                "email": "Correo",
+                "estado": "Estado",
+                "telefono": "Celular",
+                "empresa": "Empresa",
+                "planta": "Planta",
+                "valor": "Valor",
+                "rol": "Rol_Contacto",
+                "bitacora": "Bitacora"
             }
             df_c = df_c.rename(columns={k: v for k, v in col_map.items() if k in df_c.columns})
 
-            for col_req in ["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"]:
+            for col_req in ["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"]:
                 if col_req not in df_c.columns:
                     df_c[col_req] = ""
 
-            def mapear_estado(e):
-                e_str = str(e).strip().capitalize()
-                if e_str in ["Pendiente", "Propuesta", "Cotizado"]:
-                    return "Propuesta"
-                elif e_str in ["Ganado", "Aprobada", "Aprobado"]:
-                    return "Ganado"
-                elif e_str in ["Perdido", "Rechazada", "Rechazado"]:
-                    return "Perdido"
-                elif e_str in ["Prospecto", "Contactado"]:
-                    return e_str
-                elif e_str in ["Finalizado / archivo histórico", "Finalizado"]:
-                    return "Finalizado / Archivo Histórico"
-                return "Propuesta"
+            try:
+                df_facturas_exist = cargar_datos()
+                if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
+                    empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+                    mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
+                    df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
+            except Exception:
+                pass
 
-            df_c["Estado"] = df_c["Estado"].apply(mapear_estado)
             return df_c
     except Exception as e:
         st.error(f"Error al cargar contactos desde Supabase: {e}")
 
-    return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto"])
+    return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
-def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador"):
-    """Guarda o actualiza el contacto en Supabase garantizando compatibilidad de nombres de columnas."""
+def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
+    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura inicial de pruebas."""
+    try:
+        df_fact = cargar_datos()
+        if not df_fact.empty and 'Empresa' in df_fact.columns:
+            empresas_facturadas = set(df_fact['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
+            if str(empresa).strip().upper() in empresas_facturadas:
+                estado = "Ganado"
+    except Exception:
+        pass
+
     nom_final = str(nombre).strip()
     if not nom_final:
-        nom_final = str(empresa).strip().upper() if empresa else "CONTACTO NUEVO"
+        nom_final = str(empresa).strip().upper() if empresa else ""
 
     email_clean = str(email).strip().lower()
     if not email_clean or "@" not in email_clean:
-        slug_nom = nom_final.lower().replace(" ", ".")
+        slug_nom = nom_final.lower().replace(" ", ".") if nom_final else "contacto"
         slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
-    estado_normalizado = "Propuesta"
-    if str(estado).upper() in ["GANADO", "APROBADA"]:
-        estado_normalizado = "Ganado"
-    elif str(estado).upper() in ["PERDIDO", "RECHAZADA"]:
-        estado_normalizado = "Perdido"
-    elif str(estado).strip() in ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido", "Finalizado / Archivo Histórico"]:
-        estado_normalizado = str(estado).strip()
-
-    # Estructura principal en minúsculas (soporte estándar de la BD en Supabase)
-    datos_contacto_min = {
+    registro_supa = {
         "nombre": nom_final,
-        "empresa": str(empresa).strip().upper(),
-        "planta": str(planta).strip().upper() if planta else "SIN PLANTA",
+        "email": email_clean,
+        "estado": str(estado).strip() if estado else "Propuesta",
         "telefono": str(telefono).strip(),
-        "estado": estado_normalizado,
+        "empresa": str(empresa).strip().upper(),
+        "planta": str(planta).strip().upper(),
         "valor": int(valor) if valor else 0,
-        "rol": str(rol).strip() if rol else "Influenciador"
+        "rol": str(rol).strip() if rol else "Influenciador",
+        "bitacora": str(bitacora)
     }
-
+    
     try:
-        # 1. Intentar upsert con clave "nombre"
-        datos_con_nom = datos_contacto_min.copy()
-        datos_con_nom["nombre"] = nom_final
-        supabase.table("Contactos").upsert(datos_con_nom, on_conflict="nombre").execute()
+        supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
         st.cache_data.clear()
-        return True
-    except Exception:
-        try:
-            # 2. Intentar upsert con clave "Correo" en mayúscula/español
-            datos_mayus = {
-                "Nombre": nom_final,
-                "Empresa": str(empresa).strip().upper(),
-                "Planta": str(planta).strip().upper() if planta else "SIN PLANTA",
-                "Correo": email_clean,
-                "Celular": str(telefono).strip(),
-                "Estado": estado_normalizado,
-                "Valor": int(valor) if valor else 0,
-                "Rol_Contacto": str(rol).strip() if rol else "Influenciador"
-            }
-            supabase.table("Contactos").upsert(datos_mayus).execute()
-            st.cache_data.clear()
-            return True
-        except Exception as err:
-            st.warning(f"No se pudo guardar el contacto automáticamente en la tabla Contactos: {err}")
-            return False
+    except Exception as e:
+        st.error(f"Error al guardar contacto en Supabase: {e}")
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
     try:
-        supabase.table("Contactos").delete().eq("Correo", str(email).lower()).execute()
+        supabase.table("Contactos").delete().eq("email", str(email).lower()).execute()
         st.cache_data.clear()
         return True
-    except Exception:
-        try:
-            supabase.table("Contactos").delete().eq("email", str(email).lower()).execute()
-            st.cache_data.clear()
-            return True
-        except Exception as e:
-            st.error(f"Error al eliminar contacto de Supabase: {e}")
-            return False
+    except Exception as e:
+        st.error(f"Error al eliminar contacto de Supabase: {e}")
+        return False
 
 # --- GESTIÓN DE INTERACCIONES EN NUBE ---
 @st.cache_data(ttl=30)
@@ -378,7 +348,7 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y sincroniza obligatoriamente el contacto en el Embudo."""
+    """Guarda o actualiza cotización en Supabase y sincroniza SIEMPRE el contacto en la base de datos."""
     try:
         supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
         st.cache_data.clear()
@@ -391,17 +361,16 @@ def guardar_cotizacion(dict_cot):
     em_c = dict_cot.get("Email_Contacto", "").strip()
     monto_total = dict_cot.get("Monto_Total", 0)
     
-    nombre_contacto_final = nom_c if nom_c else (f"Contacto {emp_c}" if emp_c else "Contacto Cotización")
-    
-    estado_cot = str(dict_cot.get("Estado", "PENDIENTE")).upper()
+    nombre_contacto_final = nom_c if nom_c else emp_c
+    estado_cot = dict_cot.get("Estado", "PENDIENTE")
     if estado_cot in ["GANADO", "APROBADA"]:
         estado_contacto = "Ganado"
-    elif estado_cot in ["RECHAZADA", "PERDIDO"]:
+    elif estado_cot in ["RECHAZADA", "PERDIDA"]:
         estado_contacto = "Perdido"
     else:
         estado_contacto = "Propuesta"
     
-    # Sincronización asegurada de la tarjeta de contacto
+    # Sincronización asegurada de contacto
     guardar_contacto(
         nombre=nombre_contacto_final,
         email=em_c,
@@ -430,7 +399,7 @@ def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
             row_c = df_cot.loc[idx_c[0]]
             nom_c = str(row_c.get("Contacto", "")).strip()
             em_c = str(row_c.get("Email_Contacto", "")).strip()
-            nombre_contacto_final = nom_c if nom_c else f"Contacto {empresa}"
+            nombre_contacto_final = nom_c if nom_c else empresa
                 
             guardar_contacto(
                 nombre=nombre_contacto_final,
@@ -815,12 +784,13 @@ if check_password():
             if user_query:
                 with st.spinner("Procesando consulta local..."):
                     query_lower = user_query.lower()
+                    df_pag_ia = df.dropna(subset=['Fecha_Pago'])
                     if "ingresos" in query_lower or "total" in query_lower or "cuánto" in query_lower:
-                        total_2026_val = df[df['Año'] == 2026]['Monto'].sum()
-                        total_2025_val = df[df['Año'] == 2025]['Monto'].sum()
+                        total_2026_val = df_pag_ia[df_pag_ia['Año'] == 2026]['Monto'].sum()
+                        total_2025_val = df_pag_ia[df_pag_ia['Año'] == 2025]['Monto'].sum()
                         respuesta_ia = f"📊 **Análisis Local (Por Fecha de Pago):** Los ingresos reales pagados durante el año 2026 ascienden a ${total_2026_val:,.0f}".replace(",", ".") + f", comparados con ${total_2025_val:,.0f}".replace(",", ".") + " en 2025."
                     elif "cliente" in query_lower or "empresa" in query_lower:
-                        top_empresa = df[df['Año'] == 2026].groupby('Empresa')['Monto'].sum().idxmax() if not df[df['Año'] == 2026].empty else "N/A"
+                        top_empresa = df_pag_ia[df_pag_ia['Año'] == 2026].groupby('Empresa')['Monto'].sum().idxmax() if not df_pag_ia[df_pag_ia['Año'] == 2026].empty else "N/A"
                         respuesta_ia = f"🏢 **Análisis Local:** La empresa con mayor aportación de ingresos reales (pagados) durante el 2026 es **{top_empresa}**."
                     else:
                         respuesta_ia = f"🤖 **Respuesta Local:** He procesado tu consulta ('{user_query}'). Te sugiero revisar el panel de KPIs ejecutivos y el desglose de ingresos reales por planta."
@@ -922,9 +892,11 @@ if check_password():
                     else:
                         st.info(f"No hay pagos registrados para {anio}")
             st.divider()
-            empresa_sel = st.selectbox("Selecciona Empresa:", sorted(df['Empresa'].unique()), key="filtro_estatico_empresa")
-            plantas_disponibles = sorted(df[df['Empresa'] == empresa_sel]['Planta'].unique())
-            planta_sel = st.selectbox("Selecciona Planta:", plantas_disponibles, key="filtro_estatico_planta")
+            
+            empresas_unicas = sorted([e for e in df['Empresa'].unique() if e])
+            empresa_sel = st.selectbox("Selecciona Empresa:", empresas_unicas if empresas_unicas else ["SIN REGISTRO"], key="filtro_estatico_empresa")
+            plantas_disponibles = sorted([p for p in df[df['Empresa'] == empresa_sel]['Planta'].unique() if p])
+            planta_sel = st.selectbox("Selecciona Planta:", plantas_disponibles if plantas_disponibles else ["SIN PLANTA"], key="filtro_estatico_planta")
             st.subheader(f"Mix de Ingresos Pagados por Planta - {empresa_sel}")
             c_pl1, c_pl2 = st.columns(2)
             for anio, col in zip([2025, 2026], [c_pl1, c_pl2]):
@@ -1006,7 +978,7 @@ if check_password():
         elif 'Grupo Servicio' in df.columns:
             col_serv = 'Grupo Servicio'
         else:
-            df['Grupo Servicio'] = 'SIN SERVICIO'
+            df['Grupo Servicio'] = ''
             col_serv = 'Grupo Servicio'
 
         df_analisis = df.dropna(subset=['Fecha_Pago']).groupby(['Empresa', col_serv])['Monto'].sum().reset_index()
@@ -1030,19 +1002,19 @@ if check_password():
         
         col_serv_2026 = 'Grupo Servicio' if 'Grupo Servicio' in df_2026.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df_2026.columns else None)
         if not col_serv_2026:
-            df_2026['Grupo Servicio'] = 'SIN SERVICIO'
+            df_2026['Grupo Servicio'] = ''
             col_serv_2026 = 'Grupo Servicio'
         elif col_serv_2026 != 'Grupo Servicio':
             df_2026['Grupo Servicio'] = df_2026[col_serv_2026]
 
         st.write("### Identificación de Venta Cruzada")
-        servicios_disponibles = df_2026['Grupo Servicio'].unique() if not df_2026.empty else ["SERVICIO GENERAL"]
-        servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles, key="select_servicio_target_cruzada")
+        servicios_disponibles = [s for s in df_2026['Grupo Servicio'].unique() if s] if not df_2026.empty else []
+        servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles if servicios_disponibles else ["SIN SERVICIO"], key="select_servicio_target_cruzada")
              
         clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique() if not df_2026.empty else []
         todos_los_clientes = df_2026['Empresa'].unique()
              
-        clientes_potenciales = [c for c in todos_los_clientes if c not in clientes_con_servicio]
+        clientes_potenciales = [c for c in todos_los_clientes if c not in clientes_con_servicio and c]
              
         if clientes_potenciales:
             st.success(f"Empresas que podrían contratar **{servicio_target}**:")
@@ -1115,9 +1087,9 @@ if check_password():
         if "cot_detalle" not in st.session_state:
             st.session_state["cot_detalle"] = ""
         if "cot_fecha_emi" not in st.session_state:
-            st.session_state["cot_fecha_emi"] = date.today()
+            st.session_state["cot_fecha_emi"] = None
         if "cot_fecha_val" not in st.session_state:
-            st.session_state["cot_fecha_val"] = date.today() + timedelta(days=15)
+            st.session_state["cot_fecha_val"] = None
 
         with st.expander("📄 Cargar e Importar Cotización desde Archivo PDF", expanded=False):
             st.write("Sube el PDF de una cotización emitida para extraer automáticamente su información. *(No almacena archivos)*")
@@ -1147,6 +1119,22 @@ if check_password():
                         if texto_extraido:
                             import re
                             
+                            st.session_state["cot_folio"] = ""
+                            st.session_state["cot_empresa"] = ""
+                            st.session_state["cot_rut"] = ""
+                            st.session_state["cot_planta"] = ""
+                            st.session_state["cot_contacto"] = ""
+                            st.session_state["cot_email_cont"] = ""
+                            st.session_state["cot_fono_cont"] = ""
+                            st.session_state["cot_ejecutivo"] = ""
+                            st.session_state["cot_email_ejec"] = ""
+                            st.session_state["cot_fono_ejec"] = ""
+                            st.session_state["cot_neto"] = 0
+                            st.session_state["cot_glosa"] = ""
+                            st.session_state["cot_detalle"] = ""
+                            st.session_state["cot_fecha_emi"] = None
+                            st.session_state["cot_fecha_val"] = None
+                            
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_extraido, re.IGNORECASE):
                                 st.session_state["cot_moneda"] = "USD"
                             else:
@@ -1174,8 +1162,7 @@ if check_password():
                                     str_fv = m_f_val.group(1).replace('/', '-').replace('.', '-')
                                     st.session_state["cot_fecha_val"] = pd.to_datetime(str_fv, dayfirst=True if len(str_fv.split('-')[0]) <= 2 else False).date()
                                 except:
-                                    if st.session_state["cot_fecha_emi"]:
-                                        st.session_state["cot_fecha_val"] = st.session_state["cot_fecha_emi"] + timedelta(days=15)
+                                    pass
 
                             m_neto = re.search(r'(?:Neto|Subtotal|Sub-Total)\s*[:$]?\s*([\d\.\,]+)', texto_extraido, re.IGNORECASE)
                             if m_neto:
@@ -1295,8 +1282,8 @@ if check_password():
                 st.divider()
                 st.subheader("3. Detalle por Sección / Items Cotizados")
                 
-                servicios_exist = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
-                cot_grupo_serv = st.selectbox("Grupo de Servicio", options=servicios_exist, key="cot_grupo_serv_sel")
+                servicios_exist = sorted([s for s in df['Grupo Servicio'].dropna().unique().tolist() if s]) if not df.empty else []
+                cot_grupo_serv = st.selectbox("Grupo de Servicio", options=servicios_exist if servicios_exist else ["SIN SERVICIO"], key="cot_grupo_serv_sel")
                 
                 det_col0, det_col1, det_col2, det_col3, det_col4 = st.columns([1.5, 1, 1, 4, 2])
                 cot_moneda = det_col0.selectbox("Moneda *", ["CLP", "USD"], index=0 if st.session_state["cot_moneda"] == "CLP" else 1, key="cot_moneda_select_new")
@@ -1343,7 +1330,7 @@ if check_password():
                         }
                         guardar_cotizacion(dict_guardar)
                         st.cache_data.clear()
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente y sincronizada en el Embudo de Ventas!")
+                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente!")
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
 
@@ -1385,19 +1372,19 @@ if check_password():
                             ec_ejecutivo = st.text_input("Ejecutivo", value=str(row_c_edit.get('Ejecutivo', '')))
                             ec_email_ejec = st.text_input("Email Ejecutivo", value=str(row_c_edit.get('Email_Ejecutivo', '')))
                             ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
-                            ec_f_emi = st.date_input("Fecha Emisión", value=parse_date_dynamic(row_c_edit.get('Fecha_Emision'), date.today()))
-                            ec_f_val = st.date_input("Válido Hasta", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), date.today() + timedelta(days=15)))
+                            ec_f_emi = st.date_input("Fecha Emisión", value=parse_date_dynamic(row_c_edit.get('Fecha_Emision'), None))
+                            ec_f_val = st.date_input("Válido Hasta", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), None))
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
                         
-                        servicios_exist = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                        servicios_exist = sorted([s for s in df['Grupo Servicio'].dropna().unique().tolist() if s]) if not df.empty else []
                         grp_c_act = str(row_c_edit.get('Grupo_Servicio', '')).strip().upper()
                         if grp_c_act and grp_c_act not in servicios_exist:
                             servicios_exist.append(grp_c_act)
                             servicios_exist = sorted(servicios_exist)
                         idx_c_grp = servicios_exist.index(grp_c_act) if grp_c_act in servicios_exist else 0
                         
-                        ec_grupo_serv = st.selectbox("Grupo Servicio", options=servicios_exist, index=idx_c_grp, key=f"edit_grp_serv_cot_{folio_cot_editar}")
+                        ec_grupo_serv = st.selectbox("Grupo Servicio", options=servicios_exist if servicios_exist else ["SIN SERVICIO"], index=idx_c_grp if servicios_exist else 0, key=f"edit_grp_serv_cot_{folio_cot_editar}")
                         
                         ed_col0, ed_col1, ed_col2, ed_col3, ed_col4 = st.columns([1.5, 1, 1, 4, 2])
                         moneda_act = str(row_c_edit.get('Moneda', 'CLP')).upper()
@@ -1490,7 +1477,7 @@ if check_password():
         if "doc_planta_pdf" not in st.session_state:
             st.session_state["doc_planta_pdf"] = ""
         if "doc_grupo_serv" not in st.session_state:
-            st.session_state["doc_grupo_serv"] = "SERVICIO GENERAL"
+            st.session_state["doc_grupo_serv"] = ""
         if "doc_monto_neto" not in st.session_state:
             st.session_state["doc_monto_neto"] = 0
         if "doc_moneda" not in st.session_state:
@@ -1537,6 +1524,14 @@ if check_password():
 
                         if texto_fact_pdf:
                             import re
+
+                            st.session_state["doc_factura"] = ""
+                            st.session_state["doc_empresa"] = ""
+                            st.session_state["doc_planta_pdf"] = ""
+                            st.session_state["doc_monto_neto"] = 0
+                            st.session_state["doc_fecha_emi"] = None
+                            st.session_state["doc_fecha_venc"] = None
+                            st.session_state["doc_detalle"] = ""
 
                             meses_es = {
                                 'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
@@ -1626,6 +1621,13 @@ if check_password():
                     tree = ET.parse(xml_stream)
                     root = tree.getroot()
                     
+                    st.session_state["doc_factura"] = ""
+                    st.session_state["doc_empresa"] = ""
+                    st.session_state["doc_monto_neto"] = 0
+                    st.session_state["doc_fecha_emi"] = None
+                    st.session_state["doc_fecha_venc"] = None
+                    st.session_state["doc_detalle"] = ""
+
                     for elem in root.iter():
                         if '}' in elem.tag:
                             elem.tag = elem.tag.split('}', 1)[1]
@@ -1699,7 +1701,7 @@ if check_password():
                     st.session_state["doc_empresa"] = str(row_c.get("Empresa", "")).strip().upper()
                     st.session_state["doc_planta_pdf"] = str(row_c.get("Planta", "")).strip().upper()
                     
-                    grupo_cot = str(row_c.get("Grupo_Servicio", "SERVICIO GENERAL")).strip().upper()
+                    grupo_cot = str(row_c.get("Grupo_Servicio", "")).strip().upper()
                     st.session_state["doc_grupo_serv"] = grupo_cot
                     st.session_state["doc_moneda"] = str(row_c.get("Moneda", "CLP")).upper()
                     
@@ -1734,14 +1736,14 @@ if check_password():
                     n_empresa_ins = st.text_input("Empresa", value=st.session_state["doc_empresa"])
                     n_planta_ins = st.text_input("Planta", value=st.session_state["doc_planta_pdf"])
                     
-                    servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                    servicios_existentes = sorted([s for s in df['Grupo Servicio'].dropna().unique().tolist() if s]) if not df.empty else []
                     p_grp_s = st.session_state["doc_grupo_serv"]
                     if p_grp_s and p_grp_s not in servicios_existentes:
                         servicios_existentes.append(p_grp_s)
                         servicios_existentes = sorted(servicios_existentes)
                     
                     idx_grp_p = servicios_existentes.index(p_grp_s) if p_grp_s in servicios_existentes else 0
-                    n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp_p, key="n_grupo_serv_input")
+                    n_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes if servicios_existentes else ["SIN SERVICIO"], index=idx_grp_p if servicios_existentes else 0, key="n_grupo_serv_input")
                     
                     n_servicio_detalle = st.text_input("Servicio (Detalle del servicio prestado)", value=st.session_state["doc_detalle"], key="n_serv_det_input")
                     
@@ -1778,9 +1780,9 @@ if check_password():
                         nuevo_registro_supa = {
                             "Factura": str(n_factura).strip(),
                             "Empresa": n_empresa_ins.strip().upper(),
-                            "Planta": n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
+                            "Planta": n_planta_ins.strip().upper() if n_planta_ins else "",
                             "Grupo_Servicio": n_grupo_servicio.upper(),
-                            "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "SIN DETALLE",
+                            "Servicio": n_servicio_detalle.strip().upper() if n_servicio_detalle else "",
                             "Monto": int(n_monto),
                             "dias_programados": float(n_dias_prog),
                             "dias_reales": float(n_dias_real),
@@ -1801,29 +1803,15 @@ if check_password():
                             supabase.table("ingresos").upsert(nuevo_registro_supa, on_conflict="Factura").execute()
                             st.cache_data.clear()
                             
-                            if fecha_pago_final:
-                                estado_contacto_sync = "Finalizado / Archivo Histórico"
-                            else:
-                                estado_contacto_sync = "Ganado"
-
                             if cot_seleccionada != "--- Sin Enlace ---":
                                 marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
-                                guardar_contacto(
-                                    nombre=f"Contacto {n_empresa_ins.strip().upper()}",
-                                    email=f"contacto@{n_empresa_ins.strip().lower().replace(' ', '')}.cl",
-                                    estado=estado_contacto_sync,
-                                    empresa=n_empresa_ins.strip().upper(),
-                                    planta=n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
-                                    valor=int(n_monto),
-                                    rol="Finanzas / Compras"
-                                )
                             else:
                                 guardar_contacto(
-                                    nombre=f"Contacto {n_empresa_ins.strip().upper()}",
-                                    email=f"contacto@{n_empresa_ins.strip().lower().replace(' ', '')}.cl",
-                                    estado=estado_contacto_sync,
+                                    nombre=n_empresa_ins.strip().upper(),
+                                    email="",
+                                    estado="Ganado",
                                     empresa=n_empresa_ins.strip().upper(),
-                                    planta=n_planta_ins.strip().upper() if n_planta_ins else "SIN PLANTA",
+                                    planta=n_planta_ins.strip().upper() if n_planta_ins else "",
                                     valor=int(n_monto),
                                     rol="Finanzas / Compras"
                                 )
@@ -1856,13 +1844,13 @@ if check_password():
                             e_empresa = st.text_input("Empresa", value=str(row_edit.get('Empresa', '')))
                             e_planta = st.text_input("Planta", value=str(row_edit.get('Planta', '')))
                             
-                            servicios_existentes = sorted(df['Grupo Servicio'].dropna().unique().tolist()) if not df.empty else ["SERVICIO GENERAL"]
+                            servicios_existentes = sorted([s for s in df['Grupo Servicio'].dropna().unique().tolist() if s]) if not df.empty else []
                             grp_actual = str(row_edit.get('Grupo Servicio', row_edit.get('Grupo_Servicio', ''))).strip().upper()
                             if grp_actual and grp_actual not in servicios_existentes:
                                 servicios_existentes.append(grp_actual)
                                 servicios_existentes = sorted(servicios_existentes)
                             idx_grp = servicios_existentes.index(grp_actual) if grp_actual in servicios_existentes else 0
-                            e_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes, index=idx_grp, key=f"e_grupo_serv_{factura_a_editar}")
+                            e_grupo_servicio = st.selectbox("Grupo Servicio", options=servicios_existentes if servicios_existentes else ["SIN SERVICIO"], index=idx_grp if servicios_existentes else 0, key=f"e_grupo_serv_{factura_a_editar}")
                             
                             e_servicio_detalle = st.text_input("Servicio (Detalle)", value=str(row_edit.get('Servicio', '')))
                             
@@ -1916,9 +1904,9 @@ if check_password():
 
                             registro_actualizado = {
                                 "Empresa": e_empresa.strip().upper(),
-                                "Planta": e_planta.strip().upper() if e_planta else "SIN PLANTA",
+                                "Planta": e_planta.strip().upper() if e_planta else "",
                                 "Grupo_Servicio": e_grupo_servicio.upper(),
-                                "Servicio": e_servicio_detalle.strip().upper() if e_servicio_detalle else "SIN DETALLE",
+                                "Servicio": e_servicio_detalle.strip().upper() if e_servicio_detalle else "",
                                 "Monto": int(e_monto),
                                 "dias_programados": float(e_dias_prog),
                                 "dias_reales": float(e_dias_real),
@@ -1936,17 +1924,6 @@ if check_password():
 
                             try:
                                 supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
-                                
-                                if f_pago_final:
-                                    guardar_contacto(
-                                        nombre=f"Contacto {e_empresa.strip().upper()}",
-                                        email=f"contacto@{e_empresa.strip().lower().replace(' ', '')}.cl",
-                                        estado="Finalizado / Archivo Histórico",
-                                        empresa=e_empresa.strip().upper(),
-                                        planta=e_planta.strip().upper() if e_planta else "SIN PLANTA",
-                                        valor=int(e_monto)
-                                    )
-
                                 st.cache_data.clear()
                                 st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
                             except Exception as e:
@@ -2081,6 +2058,9 @@ if check_password():
     with tab5:
         st.header("🔥 Embudo de Ventas y Métricas Comerciales")
 
+        if 'Bitacora' not in df_contactos.columns:
+            df_contactos['Bitacora'] = ""
+
         estados = ["Prospecto", "Contactado", "Propuesta", "Ganado", "Perdido"]
 
         st.subheader("📈 Indicadores Clave de Rendimiento (KPIs Comerciales)")
@@ -2150,8 +2130,8 @@ if check_password():
       
         st.divider()
 
-        st.subheader("📊 Gráfico de Conversión de Oportunidades (Embudo Activo)")
-        conteo_estados = df_contactos[df_contactos['Estado'].isin(estados)]['Estado'].value_counts().reindex(estados).fillna(0).reset_index()
+        st.subheader("📊 Gráfico de Conversión de Oportunidades")
+        conteo_estados = df_contactos['Estado'].value_counts().reindex(estados).fillna(0).reset_index()
         conteo_estados.columns = ['Etapa', 'Cantidad']
 
         fig_funnel = px.funnel(
@@ -2219,7 +2199,7 @@ if check_password():
                             qe_valor = st.number_input("Valor", value=int(row.get('Valor', 0)) if pd.notna(row.get('Valor')) else 0, min_value=0, step=1000)
                             
                             idx_est_card = estados.index(row['Estado']) if row['Estado'] in estados else 0
-                            qe_estado = st.selectbox("Etapa / Estado", estados + ["Finalizado / Archivo Histórico"], index=idx_est_card)
+                            qe_estado = st.selectbox("Etapa / Estado", estados, index=idx_est_card)
                             
                             if st.form_submit_button("💾 Guardar Cambios"):
                                 guardar_contacto(
@@ -2230,12 +2210,23 @@ if check_password():
                                     empresa=qe_empresa,
                                     planta=qe_planta,
                                     valor=qe_valor,
-                                    rol=qe_rol
+                                    rol=qe_rol,
+                                    bitacora=str(row.get('Bitacora', ''))
                                 )
                                 st.cache_data.clear()
                                 st.success("¡Tarjeta actualizada en la nube!")
 
-                    with st.expander(f"📝 Registro de Eventos ({row.get('Nombre', 'Contacto')})"):
+                    nota_actual = row.get('Bitacora', '')
+                    if pd.isna(nota_actual):
+                        nota_actual = ""
+                       
+                    with st.expander(f"📝 Bitácora ({row.get('Nombre', 'Contacto')})"):
+                        nueva_nota = st.text_area(
+                            "Resumen de llamada/reunión:",
+                            value=nota_actual,
+                            key=f"bitacora_txt_{idx}"
+                        )
+
                         with st.form(f"form_interaccion_{idx}"):
                             st.write("Registrar Evento en Línea de Tiempo")
                             tipo_inter = st.selectbox("Tipo de Interacción", ["Llamada Telefónica", "Reunión", "Correo Electrónico", "WhatsApp"], key=f"tipo_int_{idx}")
@@ -2253,12 +2244,40 @@ if check_password():
                                     st.success("¡Interacción registrada en la nube!")
                                 else:
                                     st.warning("Escribe un detalle para la interacción.")
+                       
+                        if nueva_nota.strip() != "":
+                            nota_lower = nueva_nota.lower()
+                            if any(w in nota_lower for w in ["excelente", "genial", "interesado", "positivo", "listo", "pagarán", "agendar"]):
+                                st.success("😊 Sentimiento detectado en nota: **Positivo / Oportunidad Alta**")
+                            elif any(w in nota_lower for w in ["problema", "caro", "retraso", "molesto", "duda", "cancelar", "esperar"]):
+                                st.warning("⚠️ Sentimiento detectado en nota: **Riesgo / Requiere Atención**")
+                            else:
+                                st.info("ℹ️ Sentimiento detectado en nota: **Neutral**")
 
                         col_b1, col_b2 = st.columns(2)
                         with col_b1:
-                            pass
+                            if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
+                                guardar_contacto(
+                                    nombre=row['Nombre'],
+                                    email=correo_contacto,
+                                    estado=row['Estado'],
+                                    telefono=row.get('Celular', ''),
+                                    empresa=row.get('Empresa', ''),
+                                    planta=row.get('Planta', ''),
+                                    valor=row.get('Valor', 0),
+                                    rol=row.get('Rol_Contacto', 'Influenciador'),
+                                    bitacora=nueva_nota
+                                )
+                                guardar_interaccion(
+                                    nombre_contacto=row['Nombre'],
+                                    empresa=row['Empresa'],
+                                    tipo="Nota / Bitácora",
+                                    detalle=nueva_nota[:80] + "..."
+                                )
+                                st.cache_data.clear()
+                                st.success("¡Bitácora sincronizada en Supabase!")
                         with col_b2:
-                            nuevo_estado_rapido = st.selectbox("Mover:", estados + ["Finalizado / Archivo Histórico"], index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
+                            nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
                             if nuevo_estado_rapido != row['Estado']:
                                 guardar_contacto(
                                     nombre=row['Nombre'],
@@ -2268,7 +2287,8 @@ if check_password():
                                     empresa=row.get('Empresa', ''),
                                     planta=row.get('Planta', ''),
                                     valor=row.get('Valor', 0),
-                                    rol=row.get('Rol_Contacto', 'Influenciador')
+                                    rol=row.get('Rol_Contacto', 'Influenciador'),
+                                    bitacora=nota_actual
                                 )
                                 st.cache_data.clear()
 
@@ -2283,23 +2303,6 @@ if check_password():
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
                         eliminar_contacto(correo_contacto)
                         st.cache_data.clear()
-
-        st.divider()
-
-        # =====================================================================
-        # SECCIÓN DESPLEGABLE: ARCHIVO HISTÓRICO DE CONTACTOS Y PROYECTOS PAGADOS
-        # =====================================================================
-        with st.expander("📦 Historial y Contactos Finalizados (Clientes con Servicios Pagados)", expanded=False):
-            st.write("Aquí se almacenan los contactos cuyos proyectos/facturas ya fueron **pagados** y finalizados. Toda la información se conserva intacta para futuras cotizaciones o consultas.")
-            df_finalizados = df_contactos[df_contactos['Estado'] == "Finalizado / Archivo Histórico"]
-            if not df_finalizados.empty:
-                st.dataframe(
-                    df_finalizados[["Nombre", "Empresa", "Planta", "Correo", "Celular", "Valor", "Rol_Contacto"]],
-                    use_container_width=True,
-                    hide_index=True
-                )
-            else:
-                st.info("Aún no hay contactos registrados en el archivo histórico de pagos.")
 
         st.divider()
 
@@ -2401,7 +2404,7 @@ if check_password():
         excel_data = output.getvalue()
 
         st.download_button(
-            label="📊 Descargar Base de Contactos (Excel)",
+            label="📊 Descargar Base de Contactos y Bitácoras (Excel)",
             data=excel_data,
             file_name="Embudo_Ventas_Itelcam.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheet.sheet"
@@ -2426,10 +2429,10 @@ if check_password():
             with st.form("form_ticket_universal", clear_on_submit=True):
                 col_tk1, col_tk2 = st.columns(2)
                 
-                empresas_disp = sorted(df['Empresa'].unique()) if not df.empty else ["EMPRESA GENERAL"]
+                empresas_disp = sorted([e for e in df['Empresa'].unique() if e]) if not df.empty else []
                 
                 with col_tk1:
-                    tk_empresa = st.selectbox("Empresa del Cliente *", empresas_disp)
+                    tk_empresa = st.selectbox("Empresa del Cliente *", empresas_disp if empresas_disp else ["SIN REGISTRO"])
                     tk_contacto_sel = st.selectbox("Contacto Asociado (CRM)", lista_contactos_opciones)
                     tk_asunto = st.text_input("Asunto / Problema Técnico *")
                     
@@ -2470,11 +2473,11 @@ if check_password():
                     with st.form(f"form_edit_tk_{id_tk_editar}"):
                         etk_col1, etk_col2 = st.columns(2)
                         
-                        empresas_disp = sorted(df['Empresa'].unique()) if not df.empty else ["EMPRESA GENERAL"]
+                        empresas_disp = sorted([e for e in df['Empresa'].unique() if e]) if not df.empty else []
                         idx_emp_tk = empresas_disp.index(row_tk_edit.get('Empresa')) if row_tk_edit.get('Empresa') in empresas_disp else 0
                         
                         with etk_col1:
-                            etk_empresa = st.selectbox("Empresa", empresas_disp, index=idx_emp_tk, key=f"e_emp_tk_{id_tk_editar}")
+                            etk_empresa = st.selectbox("Empresa", empresas_disp if empresas_disp else ["SIN REGISTRO"], index=idx_emp_tk if empresas_disp else 0, key=f"e_emp_tk_{id_tk_editar}")
                             
                             cont_act_tk = str(row_tk_edit.get('Contacto', ''))
                             if cont_act_tk and cont_act_tk not in lista_contactos_opciones:
@@ -2540,7 +2543,7 @@ if check_password():
 
         st.divider()
 
-        with st.expander("✏️ Editar contactos existentes"):
+        with st.expander("✏️️ Editar contactos existentes"):
             for idx, row in df_contactos.iterrows():
                 with st.form(f"edit_{idx}"):
                     st.write(f"Editando: {row['Nombre']}")
@@ -2549,7 +2552,7 @@ if check_password():
                     n_planta = st.text_input("Planta", row.get('Planta', ''))
                     n_correo = st.text_input("Correo", row.get('Correo', ''))
                     n_celular = st.text_input("Celular", row.get('Celular', ''))
-                    n_estado = st.selectbox("Estado", estados + ["Finalizado / Archivo Histórico"], index=estados.index(row['Estado']) if row['Estado'] in estados else 0)
+                    n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0)
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
                     n_valor = st.number_input("Valor", value=int(row['Valor']) if pd.notna(row['Valor']) else 0, min_value=0, step=1000)
                    
@@ -2562,7 +2565,8 @@ if check_password():
                             empresa=n_empresa,
                             planta=n_planta,
                             valor=n_valor,
-                            rol=n_rol
+                            rol=n_rol,
+                            bitacora=str(row.get('Bitacora', ''))
                         )
                         st.cache_data.clear()
                         st.success("¡Contacto actualizado con éxito en Supabase!")
