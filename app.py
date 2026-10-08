@@ -206,7 +206,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         "bitacora": str(bitacora)
     }
     
-    # Manejo seguro de campo de empresa y planta según esquema de Supabase
     if empresa:
         registro_supa["Empresa"] = str(empresa).strip().upper()
     if planta:
@@ -216,7 +215,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
         st.cache_data.clear()
     except Exception as e:
-        # Fallback en caso de variación de mayúsculas/minúsculas en Supabase
         try:
             if "Empresa" in registro_supa:
                 registro_supa["empresa"] = registro_supa.pop("Empresa")
@@ -330,7 +328,7 @@ def eliminar_ticket(id_ticket):
 # --- GESTIÓN DE COTIZACIONES (SUPABASE) ---
 @st.cache_data(ttl=30)
 def cargar_cotizaciones():
-    """Carga cotizaciones directamente desde Supabase sin arrojar AttributeError con accessor .str."""
+    """Carga cotizaciones directamente desde Supabase convirtiendo fechas de forma ultra segura."""
     df_c = pd.DataFrame()
     try:
         res = supabase.table("cotizaciones").select("*").execute()
@@ -339,24 +337,28 @@ def cargar_cotizaciones():
     except Exception as e:
         st.error(f"Error al consultar cotizaciones: {e}")
         
+    cols = [
+        "Folio", "Empresa", "RUT_Empresa", "Planta", "Contacto", "Email_Contacto", 
+        "Fono_Contacto", "Ejecutivo", "Email_Ejecutivo", "Fono_Ejecutivo", 
+        "Condicion_Pago", "Moneda", "Fecha_Emision", "Fecha_Validez", "Glosa", 
+        "Grupo_Servicio", "Detalle_Servicio", "Cantidad", "Unidad", 
+        "Monto_Neto", "Monto_IVA", "Monto_Total", "Estado"
+    ]
+
     if df_c.empty:
-        cols = [
-            "Folio", "Empresa", "RUT_Empresa", "Planta", "Contacto", "Email_Contacto", 
-            "Fono_Contacto", "Ejecutivo", "Email_Ejecutivo", "Fono_Ejecutivo", 
-            "Condicion_Pago", "Moneda", "Fecha_Emision", "Fecha_Validez", "Glosa", 
-            "Grupo_Servicio", "Detalle_Servicio", "Cantidad", "Unidad", 
-            "Monto_Neto", "Monto_IVA", "Monto_Total", "Estado"
-        ]
         return pd.DataFrame(columns=cols)
 
-    if 'Moneda' not in df_c.columns:
+    for col in cols:
+        if col not in df_c.columns:
+            df_c[col] = ""
+
+    if 'Moneda' not in df_c.columns or df_c['Moneda'].isnull().all():
         df_c['Moneda'] = 'CLP'
 
-    if 'Fecha_Emision' in df_c.columns:
-        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].astype(str).str.split('T').str[0]
-        
-    if 'Fecha_Validez' in df_c.columns:
-        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].astype(str).str.split('T').str[0]
+    # Conversión directa de fechas a formato YYYY-MM-DD sin accesores .str encadenados (Previene el AttributeError)
+    for col_f in ['Fecha_Emision', 'Fecha_Validez']:
+        if col_f in df_c.columns:
+            df_c[col_f] = pd.to_datetime(df_c[col_f], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
     return df_c
 
@@ -383,7 +385,6 @@ def guardar_cotizacion(dict_cot):
     else:
         estado_contacto = "Propuesta"
     
-    # Sincronización asegurada de contacto
     guardar_contacto(
         nombre=nombre_contacto_final,
         email=em_c,
@@ -927,7 +928,6 @@ if check_password():
                         st.write(f"Sin pagos en {anio}")
             st.divider()
             
-            # --- HISTORIAL DE COTIZACIONES Y PROPUESTAS POR PLANTA / CLIENTE ---
             st.subheader(f"📑 Propuestas y Cotizaciones Emitidas - {empresa_sel} ({planta_sel})")
             if not df_cotizaciones.empty:
                 df_c_planta = df_cotizaciones[(df_cotizaciones['Empresa'].str.upper() == empresa_sel.upper()) & (df_cotizaciones['Planta'].str.upper() == planta_sel.upper())]
@@ -1132,7 +1132,6 @@ if check_password():
                         if texto_extraido:
                             import re
                             
-                            # Limpieza total inicial: si no se encuentra el dato, queda en blanco/None
                             st.session_state["cot_folio"] = ""
                             st.session_state["cot_empresa"] = ""
                             st.session_state["cot_rut"] = ""
@@ -1466,9 +1465,6 @@ if check_password():
             df_cot_disp = df_cotizaciones.copy()
             if 'Moneda' not in df_cot_disp.columns:
                 df_cot_disp['Moneda'] = 'CLP'
-            df_cot_disp['Fecha_Emision'] = df_cot_disp['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
-            if 'Fecha_Validez' in df_cot_disp.columns:
-                df_cot_disp['Fecha_Validez'] = df_cot_disp['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
                 
             cols_cot_show = [c for c in ["Folio", "Empresa", "Planta", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"] if c in df_cot_disp.columns]
             st.dataframe(
