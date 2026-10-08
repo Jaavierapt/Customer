@@ -196,9 +196,9 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     except Exception:
         pass
 
-    nom_final = str(nombre).strip()
+    nom_final = str(nombre).strip() if nombre else str(empresa).strip().upper()
     if not nom_final:
-        nom_final = str(empresa).strip().upper() if empresa else ""
+        nom_final = "Contacto Sin Nombre"
 
     email_clean = str(email).strip().lower()
     if not email_clean or "@" not in email_clean:
@@ -220,7 +220,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if planta:
         payload["Planta"] = str(planta).strip().upper()
 
-    # Reintento dinámico eliminando la columna conflictiva si Supabase la rechaza
     for _ in range(5):
         try:
             supabase.table("Contactos").upsert(payload, on_conflict="Email" if "Email" in payload else None).execute()
@@ -401,16 +400,17 @@ def guardar_cotizacion(dict_cot):
     else:
         estado_contacto = "Propuesta"
     
-    guardar_contacto(
-        nombre=nombre_contacto_final,
-        email=em_c,
-        estado=estado_contacto,
-        telefono=dict_cot.get("Fono_Contacto", ""),
-        empresa=emp_c,
-        planta=planta_c,
-        valor=monto_total,
-        rol="Tomador de Decisiones"
-    )
+    if nombre_contacto_final or emp_c:
+        guardar_contacto(
+            nombre=nombre_contacto_final,
+            email=em_c,
+            estado=estado_contacto,
+            telefono=dict_cot.get("Fono_Contacto", ""),
+            empresa=emp_c,
+            planta=planta_c,
+            valor=monto_total,
+            rol="Tomador de Decisiones"
+        )
 
 def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
     """Actualiza el estado de una cotización y su contacto a GANADO en Supabase."""
@@ -1587,10 +1587,15 @@ if check_password():
                                 mes_e = meses_es.get(mes_e_str, 1)
                                 st.session_state["doc_fecha_emi"] = date(anio_e, mes_e, dia_e)
 
-                            m_f_venc_pago = re.search(r'(\d{4}-\d{2}-\d{2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
+                            # Extracción robusta de Fecha Vencimiento desde PDF de factura
+                            m_f_venc_pago = re.search(r'(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
+                            if not m_f_venc_pago:
+                                m_f_venc_pago = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence)\s*[:#]?\s*(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})', texto_fact_pdf, re.IGNORECASE)
+                            
                             if m_f_venc_pago:
                                 try:
-                                    st.session_state["doc_fecha_venc"] = pd.to_datetime(m_f_venc_pago.group(1)).date()
+                                    str_fv_raw = m_f_venc_pago.group(1).replace('/', '-').replace('.', '-')
+                                    st.session_state["doc_fecha_venc"] = pd.to_datetime(str_fv_raw, dayfirst=True if len(str_fv_raw.split('-')[0]) <= 2 else False).date()
                                 except:
                                     pass
 
