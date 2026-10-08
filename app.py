@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
@@ -185,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura de nombres con mayúsculas iniciales de la tabla."""
+    """Inserta o actualiza un contacto en Supabase de forma segura descartando campos no soportados."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -205,47 +206,36 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
-    # Se usan las columnas con mayúscula inicial según el esquema registrado en la tabla Contactos de Supabase
-    registro_supa = {
+    payload = {
         "Nombre": nom_final,
         "Email": email_clean,
         "Estado": str(estado).strip() if estado else "Propuesta",
         "Telefono": str(telefono).strip(),
         "Valor": int(valor) if valor else 0,
         "Rol": str(rol).strip() if rol else "Influenciador",
-        "Bitacora": str(bitacora)
     }
-    
+
     if empresa:
-        registro_supa["Empresa"] = str(empresa).strip().upper()
+        payload["Empresa"] = str(empresa).strip().upper()
     if planta:
-        registro_supa["Planta"] = str(planta).strip().upper()
+        payload["Planta"] = str(planta).strip().upper()
 
-    try:
-        # Primero intentamos guardar con esquema en mayúscula
-        supabase.table("Contactos").upsert(registro_supa, on_conflict="Email").execute()
-        st.cache_data.clear()
-    except Exception as e1:
-        # Fallback a minúsculas por si la clave primaria o columna de correo usa 'email'
+    # Reintento dinámico eliminando la columna conflictiva si Supabase la rechaza
+    for _ in range(5):
         try:
-            registro_supa_lower = {
-                "nombre": nom_final,
-                "email": email_clean,
-                "estado": str(estado).strip() if estado else "Propuesta",
-                "telefono": str(telefono).strip(),
-                "valor": int(valor) if valor else 0,
-                "rol": str(rol).strip() if rol else "Influenciador",
-                "bitacora": str(bitacora)
-            }
-            if empresa:
-                registro_supa_lower["empresa"] = str(empresa).strip().upper()
-            if planta:
-                registro_supa_lower["planta"] = str(planta).strip().upper()
-
-            supabase.table("Contactos").upsert(registro_supa_lower, on_conflict="email").execute()
+            supabase.table("Contactos").upsert(payload, on_conflict="Email" if "Email" in payload else None).execute()
             st.cache_data.clear()
-        except Exception as e2:
-            st.error(f"Error al guardar contacto en Supabase: {e1}")
+            return
+        except Exception as err:
+            err_msg = str(err)
+            match = re.search(r"Could not find the '([^']+)' column", err_msg)
+            if match:
+                col_err = match.group(1)
+                payload.pop(col_err, None)
+                payload.pop(col_err.lower(), None)
+                payload.pop(col_err.capitalize(), None)
+                continue
+            break
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
@@ -382,7 +372,6 @@ def cargar_cotizaciones():
     if 'Moneda' not in df_c.columns or df_c['Moneda'].isnull().all():
         df_c['Moneda'] = 'CLP'
 
-    # Conversión directa de fechas a formato YYYY-MM-DD sin accesores .str encadenados (Previene el AttributeError)
     for col_f in ['Fecha_Emision', 'Fecha_Validez']:
         if col_f in df_c.columns:
             df_c[col_f] = pd.to_datetime(df_c[col_f], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
@@ -1157,8 +1146,6 @@ if check_password():
                                     texto_extraido += txt_p + "\n"
 
                         if texto_extraido:
-                            import re
-                            
                             st.session_state["cot_folio"] = ""
                             st.session_state["cot_empresa"] = ""
                             st.session_state["cot_rut"] = ""
@@ -1564,8 +1551,6 @@ if check_password():
                                     texto_fact_pdf += txt_p + "\n"
 
                         if texto_fact_pdf:
-                            import re
-
                             st.session_state["doc_factura"] = ""
                             st.session_state["doc_empresa"] = ""
                             st.session_state["doc_planta_pdf"] = ""
