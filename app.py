@@ -176,7 +176,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura existente."""
+    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura exacta de la tabla."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -215,15 +215,7 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
         st.cache_data.clear()
     except Exception as e:
-        try:
-            if "Empresa" in registro_supa:
-                registro_supa["empresa"] = registro_supa.pop("Empresa")
-            if "Planta" in registro_supa:
-                registro_supa["planta"] = registro_supa.pop("Planta")
-            supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
-            st.cache_data.clear()
-        except Exception as e2:
-            st.error(f"Error al guardar contacto en Supabase: {e2}")
+        st.error(f"Error al guardar contacto en Supabase: {e}")
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
