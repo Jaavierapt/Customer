@@ -146,13 +146,22 @@ def cargar_contactos():
             col_map = {
                 "nombre": "Nombre",
                 "email": "Correo",
+                "Correo": "Correo",
+                "Email": "Correo",
                 "estado": "Estado",
+                "Estado": "Estado",
                 "telefono": "Celular",
+                "Telefono": "Celular",
                 "empresa": "Empresa",
+                "Empresa": "Empresa",
                 "planta": "Planta",
+                "Planta": "Planta",
                 "valor": "Valor",
+                "Valor": "Valor",
                 "rol": "Rol_Contacto",
-                "bitacora": "Bitacora"
+                "Rol": "Rol_Contacto",
+                "bitacora": "Bitacora",
+                "Bitacora": "Bitacora"
             }
             df_c = df_c.rename(columns={k: v for k, v in col_map.items() if k in df_c.columns})
 
@@ -176,7 +185,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura exacta de la tabla."""
+    """Inserta o actualiza un contacto directamente en Supabase respetando la estructura de nombres con mayúsculas iniciales de la tabla."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -196,14 +205,15 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
+    # Se usan las columnas con mayúscula inicial según el esquema registrado en la tabla Contactos de Supabase
     registro_supa = {
-        "nombre": nom_final,
-        "email": email_clean,
-        "estado": str(estado).strip() if estado else "Propuesta",
-        "telefono": str(telefono).strip(),
-        "valor": int(valor) if valor else 0,
-        "rol": str(rol).strip() if rol else "Influenciador",
-        "bitacora": str(bitacora)
+        "Nombre": nom_final,
+        "Email": email_clean,
+        "Estado": str(estado).strip() if estado else "Propuesta",
+        "Telefono": str(telefono).strip(),
+        "Valor": int(valor) if valor else 0,
+        "Rol": str(rol).strip() if rol else "Influenciador",
+        "Bitacora": str(bitacora)
     }
     
     if empresa:
@@ -212,20 +222,45 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         registro_supa["Planta"] = str(planta).strip().upper()
 
     try:
-        supabase.table("Contactos").upsert(registro_supa, on_conflict="email").execute()
+        # Primero intentamos guardar con esquema en mayúscula
+        supabase.table("Contactos").upsert(registro_supa, on_conflict="Email").execute()
         st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error al guardar contacto en Supabase: {e}")
+    except Exception as e1:
+        # Fallback a minúsculas por si la clave primaria o columna de correo usa 'email'
+        try:
+            registro_supa_lower = {
+                "nombre": nom_final,
+                "email": email_clean,
+                "estado": str(estado).strip() if estado else "Propuesta",
+                "telefono": str(telefono).strip(),
+                "valor": int(valor) if valor else 0,
+                "rol": str(rol).strip() if rol else "Influenciador",
+                "bitacora": str(bitacora)
+            }
+            if empresa:
+                registro_supa_lower["empresa"] = str(empresa).strip().upper()
+            if planta:
+                registro_supa_lower["planta"] = str(planta).strip().upper()
+
+            supabase.table("Contactos").upsert(registro_supa_lower, on_conflict="email").execute()
+            st.cache_data.clear()
+        except Exception as e2:
+            st.error(f"Error al guardar contacto en Supabase: {e1}")
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
     try:
-        supabase.table("Contactos").delete().eq("email", str(email).lower()).execute()
+        supabase.table("Contactos").delete().eq("Email", str(email).lower()).execute()
         st.cache_data.clear()
         return True
-    except Exception as e:
-        st.error(f"Error al eliminar contacto de Supabase: {e}")
-        return False
+    except Exception:
+        try:
+            supabase.table("Contactos").delete().eq("email", str(email).lower()).execute()
+            st.cache_data.clear()
+            return True
+        except Exception as e:
+            st.error(f"Error al eliminar contacto de Supabase: {e}")
+            return False
 
 # --- GESTIÓN DE INTERACCIONES EN NUBE ---
 @st.cache_data(ttl=30)
