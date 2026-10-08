@@ -330,7 +330,7 @@ def eliminar_ticket(id_ticket):
 # --- GESTIÓN DE COTIZACIONES (SUPABASE) ---
 @st.cache_data(ttl=30)
 def cargar_cotizaciones():
-    """Carga cotizaciones directamente desde Supabase."""
+    """Carga cotizaciones directamente desde Supabase sin arrojar AttributeError con accessor .str."""
     df_c = pd.DataFrame()
     try:
         res = supabase.table("cotizaciones").select("*").execute()
@@ -353,10 +353,10 @@ def cargar_cotizaciones():
         df_c['Moneda'] = 'CLP'
 
     if 'Fecha_Emision' in df_c.columns:
-        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].str.split('T').str[0]
+        df_c['Fecha_Emision'] = df_c['Fecha_Emision'].astype(str).str.split(' ').str[0].astype(str).str.split('T').str[0]
         
     if 'Fecha_Validez' in df_c.columns:
-        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].str.split('T').str[0]
+        df_c['Fecha_Validez'] = df_c['Fecha_Validez'].astype(str).str.split(' ').str[0].astype(str).str.split('T').str[0]
 
     return df_c
 
@@ -1132,6 +1132,7 @@ if check_password():
                         if texto_extraido:
                             import re
                             
+                            # Limpieza total inicial: si no se encuentra el dato, queda en blanco/None
                             st.session_state["cot_folio"] = ""
                             st.session_state["cot_empresa"] = ""
                             st.session_state["cot_rut"] = ""
@@ -1520,7 +1521,7 @@ if check_password():
             
             if archivo_pdf_fact is not None:
                 if not PDF_READER_AVAILABLE:
-                    st.error("⚠️️ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
+                    st.error("⚠ Para procesar archivos PDF en la nube, debes agregar `pdfplumber` a tu archivo `requirements.txt` de GitHub.")
                 else:
                     try:
                         texto_fact_pdf = ""
@@ -1955,7 +1956,7 @@ if check_password():
                 
                 if factura_a_eliminar:
                     row_f_del = df[df['Factura'].astype(str) == str(factura_a_eliminar)].iloc[0]
-                    st.warning(f"⚠️️ ¿Estás seguro de que deseas eliminar permanentemente la Factura N° **#{factura_a_eliminar}** de la empresa **{row_f_del.get('Empresa', 'N/A')}**?")
+                    st.warning(f"⚠ ¿Estás seguro de que deseas eliminar permanentemente la Factura N° **#{factura_a_eliminar}** de la empresa **{row_f_del.get('Empresa', 'N/A')}**?")
                     
                     if st.button(f"🔥 Confirmar y Eliminar Factura #{factura_a_eliminar}", key="btn_confirm_del_factura"):
                         if eliminar_factura(factura_a_eliminar):
@@ -2048,7 +2049,7 @@ if check_password():
                     required=True,
                 )
             }
-           
+            
             df_editado = st.data_editor(
                 df[columnas_esenciales],
                 column_config=configuracion_columnas,
@@ -2572,7 +2573,7 @@ if check_password():
                     n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0)
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
                     n_valor = st.number_input("Valor", value=int(row['Valor']) if pd.notna(row['Valor']) else 0, min_value=0, step=1000)
-                   
+                    
                     if st.form_submit_button("💾 Guardar Cambios"):
                         guardar_contacto(
                             nombre=n_nombre,
