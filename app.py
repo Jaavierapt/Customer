@@ -1579,59 +1579,66 @@ if check_password():
                                 val_ef = re.split(r'\b(?:RUT|R\.U\.T|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
                                 st.session_state["doc_empresa"] = val_ef.upper()
 
-                            m_f_emi_txt = re.search(r'Fecha\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_fact_pdf, re.IGNORECASE)
-                            if m_f_emi_txt:
-                                dia_e = int(m_f_emi_txt.group(1))
-                                mes_e_str = m_f_emi_txt.group(2).lower()
-                                anio_e = int(m_f_emi_txt.group(3))
-                                mes_e = meses_es.get(mes_e_str, 1)
-                                st.session_state["doc_fecha_emi"] = date(anio_e, mes_e, dia_e)
-
-                            # --- EXTRACTOR DE FECHA DE VENCIMIENTO MULTIFORMATO PARA FACTURAS CHILENAS ---
-                            fecha_venc_hallada = None
+                            # --- PROCESAMIENTO LÍNEA POR LÍNEA PARA DISTINGUIR FECHAS CON EXACTITUD ---
+                            lineas = [line.strip() for line in texto_fact_pdf.split('\n') if line.strip()]
                             
-                            # 1. Búsqueda por patrón textual "DD de Mes del YYYY"
-                            m_venc_txt = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence|FchVenc|Fecha\s*L[ií]mite)\s*[:#]?\s*(\d{1,2})\s*de\s*([A-Za-z]+)\s*del?\s*(\d{4})', texto_fact_pdf, re.IGNORECASE)
-                            if m_venc_txt:
-                                try:
-                                    dia_v = int(m_venc_txt.group(1))
-                                    mes_v_str = m_venc_txt.group(2).lower()
-                                    anio_v = int(m_venc_txt.group(3))
-                                    mes_v = meses_es.get(mes_v_str, 1)
-                                    fecha_venc_hallada = date(anio_v, mes_v, dia_v)
-                                except Exception:
-                                    pass
+                            fecha_emi_hallada = None
+                            fecha_venc_hallada = None
 
-                            # 2. Búsqueda por patrón numérico (DD-MM-YYYY o YYYY-MM-DD o DD/MM/YYYY)
-                            if not fecha_venc_hallada:
-                                m_venc_num = re.search(r'(?:Vencimiento|Fecha\s*Vencimiento|Vence|FchVenc|Fecha\s*L[ií]mite)\s*[:#]?\s*(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})', texto_fact_pdf, re.IGNORECASE)
-                                if m_venc_num:
-                                    try:
-                                        str_fv = m_venc_num.group(1).replace('/', '-').replace('.', '-')
-                                        partes = str_fv.split('-')
-                                        if len(partes[0]) == 4:
-                                            fecha_venc_hallada = pd.to_datetime(str_fv).date()
-                                        else:
-                                            fecha_venc_hallada = pd.to_datetime(str_fv, dayfirst=True).date()
-                                    except Exception:
-                                        pass
+                            for line in lineas:
+                                line_lower = line.lower()
+                                
+                                # 1. Búsqueda exclusiva de FECHA DE VENCIMIENTO por línea
+                                if any(kw in line_lower for kw in ['vencimiento', 'fch.venc', 'fch venc', 'fecha venc', 'vence']):
+                                    m_v_txt = re.search(r'(\d{1,2})\s*de\s*([a-z]+)\s*del?\s*(\d{4})', line_lower)
+                                    if m_v_txt:
+                                        try:
+                                            d_v = int(m_v_txt.group(1))
+                                            m_v = meses_es.get(m_v_txt.group(2), 1)
+                                            a_v = int(m_v_txt.group(3))
+                                            fecha_venc_hallada = date(a_v, m_v, d_v)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        m_v_num = re.search(r'(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})', line)
+                                        if m_v_num:
+                                            try:
+                                                str_v = m_v_num.group(1).replace('/', '-').replace('.', '-')
+                                                partes = str_v.split('-')
+                                                if len(partes[0]) == 4:
+                                                    fecha_venc_hallada = pd.to_datetime(str_v).date()
+                                                else:
+                                                    fecha_venc_hallada = pd.to_datetime(str_v, dayfirst=True).date()
+                                            except Exception:
+                                                pass
 
-                            # 3. Búsqueda secundaria en tabla de montos (YYYY-MM-DD ... $ ... Pago total)
-                            if not fecha_venc_hallada:
-                                m_f_venc_pago = re.search(r'(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2})\s*\$[\d\.\,]+\s*Pago\s*total', texto_fact_pdf, re.IGNORECASE)
-                                if m_f_venc_pago:
-                                    try:
-                                        fecha_venc_hallada = pd.to_datetime(m_f_venc_pago.group(1)).date()
-                                    except Exception:
-                                        pass
+                                # 2. Búsqueda exclusiva de FECHA DE EMISIÓN por línea
+                                if any(kw in line_lower for kw in ['emision', 'emisión', 'fecha emi', 'fch.emis', 'fch emis']):
+                                    m_e_txt = re.search(r'(\d{1,2})\s*de\s*([a-z]+)\s*del?\s*(\d{4})', line_lower)
+                                    if m_e_txt:
+                                        try:
+                                            d_e = int(m_e_txt.group(1))
+                                            m_e = meses_es.get(m_e_txt.group(2), 1)
+                                            a_e = int(m_e_txt.group(3))
+                                            fecha_emi_hallada = date(a_e, m_e, d_e)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        m_e_num = re.search(r'(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})', line)
+                                        if m_e_num:
+                                            try:
+                                                str_e = m_e_num.group(1).replace('/', '-').replace('.', '-')
+                                                partes = str_e.split('-')
+                                                if len(partes[0]) == 4:
+                                                    fecha_emi_hallada = pd.to_datetime(str_e).date()
+                                                else:
+                                                    fecha_emi_hallada = pd.to_datetime(str_e, dayfirst=True).date()
+                                            except Exception:
+                                                pass
 
-                            # GARANTIZAR REGISTRO DE FECHA DE VENCIMIENTO AL SUBIR EL ARCHIVO
-                            if fecha_venc_hallada:
-                                st.session_state["doc_fecha_venc"] = fecha_venc_hallada
-                            elif st.session_state["doc_fecha_emi"]:
-                                st.session_state["doc_fecha_venc"] = st.session_state["doc_fecha_emi"]
-                            else:
-                                st.session_state["doc_fecha_venc"] = datetime.now().date()
+                            # Asignación estricta y diferenciada
+                            st.session_state["doc_fecha_emi"] = fecha_emi_hallada
+                            st.session_state["doc_fecha_venc"] = fecha_venc_hallada
 
                             m_planta_pdf = re.search(r'Planta\s+([A-Za-z0-9\áéíóúÁÉÍÓÚñÑ]+)', texto_fact_pdf, re.IGNORECASE)
                             if m_planta_pdf:
@@ -1728,13 +1735,6 @@ if check_password():
                             st.session_state["doc_fecha_venc"] = pd.to_datetime(fch_venc_elem.text.strip()).date()
                         except:
                             pass
-
-                    # GARANTIZAR REGISTRO DE FECHA DE VENCIMIENTO EN XML AL SUBIR EL ARCHIVO
-                    if not st.session_state["doc_fecha_venc"]:
-                        if st.session_state["doc_fecha_emi"]:
-                            st.session_state["doc_fecha_venc"] = st.session_state["doc_fecha_emi"]
-                        else:
-                            st.session_state["doc_fecha_venc"] = datetime.now().date()
 
                     detalles_items = []
                     for item in root.findall(".//DchItem"):
