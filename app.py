@@ -124,7 +124,7 @@ def cargar_datos():
     if 'Factura' in df.columns:
         df['Factura_Num'] = pd.to_numeric(df['Factura'], errors='coerce')
         df = df.sort_values(by=['Factura_Num', 'Factura'], ascending=[False, False]).drop(columns=['Factura_Num'])
-         
+          
     return df
 
 def eliminar_factura(numero_factura):
@@ -808,7 +808,7 @@ if check_password():
                 st.info("No hay eventos registrados en la sesión actual.")
 
         st.subheader("🤖 Asistente de Inteligencia Comercial")
-       
+        
         user_query = st.text_input("Pregúntale algo sobre tus ingresos o tendencias:", key="input_ia")
         if st.button("Consultar IA"):
             if user_query:
@@ -824,7 +824,7 @@ if check_password():
                         respuesta_ia = f"🏢 **Análisis Local:** La empresa con mayor aportación de ingresos reales (pagados) durante el 2026 es **{top_empresa}**."
                     else:
                         respuesta_ia = f"🤖 **Respuesta Local:** He procesado tu consulta ('{user_query}'). Te sugiero revisar el panel de KPIs ejecutivos y el desglose de ingresos reales por planta."
-                 
+                  
                     st.write("### Respuesta de la IA:")
                     st.write(respuesta_ia)
             else:
@@ -1386,7 +1386,7 @@ if check_password():
                             ec_rut = st.text_input("RUT Cliente", value=str(row_c_edit.get('RUT_Empresa', '')))
                             ec_planta = st.text_input("Planta", value=str(row_c_edit.get('Planta', '')))
                             ec_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"],
-                                                       index=["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"].index(row_c_edit.get('Condicion_Pago', 'Contado CLP')) if row_c_edit.get('Condicion_Pago') in ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"] else 0)
+                                                               index=["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"].index(row_c_edit.get('Condicion_Pago', 'Contado CLP')) if row_c_edit.get('Condicion_Pago') in ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"] else 0)
                         
                         with ec_col2:
                             ec_contacto = st.text_input("Contacto Cliente", value=str(row_c_edit.get('Contacto', '')))
@@ -1910,6 +1910,13 @@ if check_password():
                                 return None
                         return None
 
+                    cotizaciones_list = df_cotizaciones["Folio"].astype(str).tolist() if not df_cotizaciones.empty else []
+                    e_cot_seleccionada = st.selectbox(
+                        "🔗 Enlazar Cotización Existente (Opcional):",
+                        options=["--- Sin Enlace ---"] + cotizaciones_list,
+                        key=f"edit_select_cot_to_fact_{factura_a_editar}"
+                    )
+
                     with st.form(f"form_editar_factura_{factura_a_editar}"):
                         e_col1, e_col2 = st.columns(2)
                         with e_col1:
@@ -1996,6 +2003,10 @@ if check_password():
 
                             try:
                                 supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
+                                
+                                if e_cot_seleccionada != "--- Sin Enlace ---":
+                                    marcar_cotizacion_como_ganada(e_cot_seleccionada, e_empresa.strip().upper(), e_planta.strip().upper(), int(e_monto))
+                                
                                 st.cache_data.clear()
                                 st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
                             except Exception as e:
