@@ -383,12 +383,9 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase asegurando el guardado exacto de Tipo_Cotizacion."""
-    # Asegurar que Tipo_Cotizacion no venga vacío o Nulo
+    """Guarda o actualiza cotización en Supabase descartando campos no soportados si aplica."""
     if "Tipo_Cotizacion" not in dict_cot or not dict_cot["Tipo_Cotizacion"]:
         dict_cot["Tipo_Cotizacion"] = "PUNTUAL"
-    else:
-        dict_cot["Tipo_Cotizacion"] = str(dict_cot["Tipo_Cotizacion"]).strip().upper()
         
     for _ in range(3):
         try:
@@ -432,7 +429,6 @@ def guardar_cotizacion(dict_cot):
             valor=monto_total,
             rol="Tomador de Decisiones"
         )
-
 
 def marcar_cotizacion_como_ganada(folio_cot, empresa, planta, monto):
     """Actualiza el estado de una cotización y su contacto a GANADO en Supabase."""
