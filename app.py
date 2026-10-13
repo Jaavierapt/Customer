@@ -358,7 +358,7 @@ def cargar_cotizaciones():
         "Fono_Contacto", "Ejecutivo", "Email_Ejecutivo", "Fono_Ejecutivo", 
         "Condicion_Pago", "Moneda", "Fecha_Emision", "Fecha_Validez", "Glosa", 
         "Grupo_Servicio", "Detalle_Servicio", "Cantidad", "Unidad", 
-        "Monto_Neto", "Monto_IVA", "Monto_Total", "Estado"
+        "Monto_Neto", "Monto_IVA", "Monto_Total", "Estado", "Tipo_Cotizacion"
     ]
 
     if df_c.empty:
@@ -366,7 +366,12 @@ def cargar_cotizaciones():
 
     for col in cols:
         if col not in df_c.columns:
-            df_c[col] = ""
+            if col == "Tipo_Cotizacion":
+                df_c[col] = "PUNTUAL"
+            else:
+                df_c[col] = ""
+
+    df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].fillna('PUNTUAL').replace('', 'PUNTUAL')
 
     if 'Moneda' not in df_c.columns or df_c['Moneda'].isnull().all():
         df_c['Moneda'] = 'CLP'
@@ -378,12 +383,25 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase y sincroniza el contacto en la base de datos."""
-    try:
-        supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
-        st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error al guardar cotización en Supabase: {e}")
+    """Guarda o actualiza cotización en Supabase descartando campos no soportados si aplica."""
+    if "Tipo_Cotizacion" not in dict_cot or not dict_cot["Tipo_Cotizacion"]:
+        dict_cot["Tipo_Cotizacion"] = "PUNTUAL"
+        
+    for _ in range(3):
+        try:
+            supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
+            st.cache_data.clear()
+            break
+        except Exception as e:
+            err_msg = str(e)
+            match = re.search(r"Could not find the '([^']+)' column", err_msg)
+            if match:
+                col_err = match.group(1)
+                dict_cot.pop(col_err, None)
+                continue
+            else:
+                st.error(f"Error al guardar cotización en Supabase: {e}")
+                break
         
     nom_c = dict_cot.get("Contacto", "").strip()
     emp_c = dict_cot.get("Empresa", "").strip()
@@ -948,8 +966,9 @@ if check_password():
             if not df_cotizaciones.empty:
                 df_c_planta = df_cotizaciones[(df_cotizaciones['Empresa'].str.upper() == empresa_sel.upper()) & (df_cotizaciones['Planta'].str.upper() == planta_sel.upper())]
                 if not df_c_planta.empty:
+                    cols_cot_plt = [c for c in ["Folio", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Detalle_Servicio", "Monto_Total", "Tipo_Cotizacion", "Estado"] if c in df_c_planta.columns]
                     st.dataframe(
-                        df_c_planta[["Folio", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Detalle_Servicio", "Monto_Total", "Estado"]],
+                        df_c_planta[cols_cot_plt],
                         use_container_width=True,
                         hide_index=True
                     )
@@ -1082,10 +1101,85 @@ if check_password():
         st.divider()
 
     # =========================================================================
-    # SECCIÓN: MÓDULO DE COTIZACIONES (CREAR, EDITAR Y ELIMINAR)
+    # SECCIÓN: MÓDULO DE COTIZACIONES (CREAR, EDITAR Y ELIMINAR + KPIS PUNTUALES)
     # =========================================================================
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
+
+        # --- SECCIÓN DE KPIS DE EFICIENCIA (EXCLUSIVA DE COTIZACIONES PUNTUALES) ---
+        st.subheader("⚡ KPIs de Eficiencia Comercial (Solo Servicios Puntuales)")
+        
+        if not df_cotizaciones.empty:
+            df_cot_puntuales = df_cotizaciones[df_cotizaciones['Tipo_Cotizacion'].fillna('PUNTUAL').astype(str).str.upper() == 'PUNTUAL'].copy()
+            
+            if not df_cot_puntuales.empty:
+                # Filtrar facturas asociadas a cotizaciones
+                df_fact_validas = df[df['Fecha_Cotizacion'].notna() | df['Fecha_Emision'].notna()].copy() if not df.empty else pd.DataFrame()
+                
+                dias_cierre_lista = []
+                if not df_fact_validas.empty:
+                    for _, r_cot in df_cot_puntuales.iterrows():
+                        f_cot_str = r_cot.get('Fecha_Emision')
+                        fol_cot_str = str(r_cot.get('Folio', '')).strip()
+                        emp_cot_str = str(r_cot.get('Empresa', '')).strip().upper()
+                        
+                        if pd.notna(f_cot_str) and str(f_cot_str).strip() not in ["", "None", "NaT"]:
+                            dt_cot_emi = pd.to_datetime(f_cot_str, errors='coerce')
+                            if pd.notna(dt_cot_emi):
+                                # Buscar factura vinculada por fecha de cotización o coincidencia de empresa/monto
+                                df_match_f = df_fact_validas[
+                                    (df_fact_validas['Fecha_Cotizacion'] == dt_cot_emi) | 
+                                    (df_fact_validas['Empresa'].str.upper() == emp_cot_str)
+                                ]
+                                
+                                if not df_match_f.empty:
+                                    # Tomar la fecha de emisión de factura más cercana o primera existente
+                                    dt_fact_emi = df_match_f['Fecha_Emision'].dropna()
+                                    if not dt_fact_emi.empty:
+                                        primera_f_emi = dt_fact_emi.min()
+                                        dias = (primera_f_emi - dt_cot_emi).days
+                                        if dias >= 0:
+                                            dias_cierre_lista.append(dias)
+
+                prom_dias_cierre = round(sum(dias_cierre_lista) / len(dias_cierre_lista), 1) if dias_cierre_lista else 0.0
+                
+                total_puntuales = len(df_cot_puntuales)
+                ganadas_puntuales = len(df_cot_puntuales[df_cot_puntuales['Estado'].astype(str).str.upper().isin(['GANADO', 'APROBADA'])])
+                tasa_conv_puntual = round((ganadas_puntuales / total_puntuales * 100), 1) if total_puntuales > 0 else 0.0
+
+                # Detectar anomalías (Cotizaciones puntuales en PENDIENTE > 30 días)
+                hoy_dt = pd.Timestamp.now()
+                df_cot_puntuales['Fecha_Emision_DT'] = pd.to_datetime(df_cot_puntuales['Fecha_Emision'], errors='coerce')
+                df_cot_puntuales['Dias_Abierta'] = (hoy_dt - df_cot_puntuales['Fecha_Emision_DT']).dt.days
+                
+                anomalias_puntuales = df_cot_puntuales[
+                    (df_cot_puntuales['Estado'].astype(str).str.upper() == 'PENDIENTE') & 
+                    (df_cot_puntuales['Dias_Abierta'] > 30)
+                ]
+
+                kpi_p1, kpi_p2, kpi_p3, kpi_p4 = st.columns(4)
+                kpi_p1.metric("Promedio Cierre a Factura", f"{prom_dias_cierre} días", help="Días promedio desde la emisión de cotización puntual hasta su primera factura.")
+                kpi_p2.metric("Conversión Puntual", f"{tasa_conv_puntual}%")
+                kpi_p3.metric("Cotizaciones Puntuales Emitidas", total_puntuales)
+                kpi_p4.metric("Anomalías (>30 días estancadas)", len(anomalias_puntuales), delta_color="inverse")
+
+                if not anomalias_puntuales.empty:
+                    with st.expander(f"🚨 Ver {len(anomalias_puntuales)} Cotización(es) Puntual(es) con Retraso Crítico (>30 días)"):
+                        st.dataframe(
+                            anomalias_puntuales[['Folio', 'Empresa', 'Planta', 'Grupo_Servicio', 'Monto_Total', 'Dias_Abierta']],
+                            column_config={
+                                "Dias_Abierta": st.column_config.NumberColumn("Días Sin Facturar", format="%d días"),
+                                "Monto_Total": st.column_config.NumberColumn("Monto Total", format="$%d")
+                            },
+                            use_container_width=True,
+                            hide_index=True
+                        )
+            else:
+                st.info("No hay cotizaciones clasificadas como 'PUNTUAL' para mostrar KPIs de eficiencia.")
+        else:
+            st.info("Sin cotizaciones en el sistema.")
+
+        st.divider()
 
         if "cot_folio" not in st.session_state:
             st.session_state["cot_folio"] = f"137{len(df_cotizaciones)+7}"
@@ -1119,6 +1213,8 @@ if check_password():
             st.session_state["cot_fecha_emi"] = None
         if "cot_fecha_val" not in st.session_state:
             st.session_state["cot_fecha_val"] = None
+        if "cot_tipo_servicio" not in st.session_state:
+            st.session_state["cot_tipo_servicio"] = "PUNTUAL"
 
         with st.expander("📄 Cargar e Importar Cotización desde Archivo PDF", expanded=False):
             st.write("Sube el PDF de una cotización emitida para extraer automáticamente su información. *(No almacena archivos)*")
@@ -1162,6 +1258,11 @@ if check_password():
                             st.session_state["cot_fecha_emi"] = None
                             st.session_state["cot_fecha_val"] = None
                             
+                            if re.search(r'\b(?:MANTENIMIENTO|MANTENCION|TRIMESTRAL|MENSUAL|ANUAL|RECURRENTE)\b', texto_extraido, re.IGNORECASE):
+                                st.session_state["cot_tipo_servicio"] = "RECURRENTE"
+                            else:
+                                st.session_state["cot_tipo_servicio"] = "PUNTUAL"
+
                             if re.search(r'\b(?:USD|d[oó]lares|US\$|USD\$)\b', texto_extraido, re.IGNORECASE):
                                 st.session_state["cot_moneda"] = "USD"
                             else:
@@ -1302,12 +1403,22 @@ if check_password():
                     cot_f_emi = c_f1.date_input("Fecha Emisión", value=st.session_state["cot_fecha_emi"])
                     cot_f_val = c_f2.date_input("Válido Hasta (Validez Cotización)", value=st.session_state["cot_fecha_val"])
 
+                # --- CAMPO SOLICITADO: TIPO DE SERVICIO (PUNTUAL VS RECURRENTE) ---
+                st.subheader("2. Carácter y Tipo de Servicio")
+                cot_tipo_servicio = st.radio(
+                    "¿Es un servicio recurrente o puntual?",
+                    ["PUNTUAL", "RECURRENTE"],
+                    index=0 if st.session_state["cot_tipo_servicio"] == "PUNTUAL" else 1,
+                    horizontal=True,
+                    help="Las cotizaciones puntuales se incluyen en los KPIs de velocidad y eficiencia de facturación. Las recurrentes (ej: mantenimientos) se excluyen para evitar distorsiones."
+                )
+
                 st.divider()
-                st.subheader("2. Glosa Descriptiva del Servicio")
+                st.subheader("3. Glosa Descriptiva del Servicio")
                 cot_glosa = st.text_area("Glosa / Descripción resumida del trabajo:", value=st.session_state["cot_glosa"])
 
                 st.divider()
-                st.subheader("3. Detalle por Sección / Items Cotizados")
+                st.subheader("4. Detalle por Sección / Items Cotizados")
                 
                 servicios_exist = sorted([s for s in df['Grupo Servicio'].dropna().unique().tolist() if s]) if not df.empty else []
                 cot_grupo_serv = st.selectbox("Grupo de Servicio", options=servicios_exist if servicios_exist else ["SIN SERVICIO"], key="cot_grupo_serv_sel")
@@ -1353,11 +1464,12 @@ if check_password():
                             "Monto_Neto": int(cot_neto),
                             "Monto_IVA": calc_iva,
                             "Monto_Total": calc_total,
-                            "Estado": "PENDIENTE"
+                            "Estado": "PENDIENTE",
+                            "Tipo_Cotizacion": cot_tipo_servicio
                         }
                         guardar_cotizacion(dict_guardar)
                         st.cache_data.clear()
-                        st.success(f"¡Cotización Folio N° {cot_folio} guardada exitosamente!")
+                        st.success(f"¡Cotización Folio N° {cot_folio} ({cot_tipo_servicio}) guardada exitosamente!")
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
 
@@ -1401,6 +1513,16 @@ if check_password():
                             ec_fono_ejec = st.text_input("Fono Ejecutivo", value=str(row_c_edit.get('Fono_Ejecutivo', '')))
                             ec_f_emi = st.date_input("Fecha Emisión", value=parse_date_dynamic(row_c_edit.get('Fecha_Emision'), None))
                             ec_f_val = st.date_input("Válido Hasta (Validez Cotización)", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), None))
+
+                        # --- OPCIÓN PARA MODIFICAR TIPO DE SERVICIO EN COTIZACIONES EXISTENTES ---
+                        tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).upper()
+                        ec_tipo_servicio = st.radio(
+                            "Tipo de Servicio (Filtrado para KPIs):",
+                            ["PUNTUAL", "RECURRENTE"],
+                            index=0 if tipo_actual == "PUNTUAL" else 1,
+                            horizontal=True,
+                            key=f"edit_tipo_serv_{folio_cot_editar}"
+                        )
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
                         
@@ -1448,7 +1570,8 @@ if check_password():
                                 "Monto_Neto": int(ec_neto),
                                 "Monto_IVA": c_iva_edit,
                                 "Monto_Total": c_total_edit,
-                                "Estado": ec_estado
+                                "Estado": ec_estado,
+                                "Tipo_Cotizacion": ec_tipo_servicio
                             }
                             guardar_cotizacion(dict_editado)
                             st.cache_data.clear()
@@ -1480,14 +1603,15 @@ if check_password():
             if 'Moneda' not in df_cot_disp.columns:
                 df_cot_disp['Moneda'] = 'CLP'
                 
-            cols_cot_show = [c for c in ["Folio", "Empresa", "Planta", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Estado"] if c in df_cot_disp.columns]
+            cols_cot_show = [c for c in ["Folio", "Empresa", "Planta", "Contacto", "Fecha_Emision", "Fecha_Validez", "Moneda", "Grupo_Servicio", "Monto_Neto", "Monto_Total", "Tipo_Cotizacion", "Estado"] if c in df_cot_disp.columns]
             st.dataframe(
                 df_cot_disp[cols_cot_show],
                 column_config={
                     "Monto_Neto": st.column_config.NumberColumn("Monto Neto", format="%d"),
                     "Monto_Total": st.column_config.NumberColumn("Total", format="%d"),
                     "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión"),
-                    "Fecha_Validez": st.column_config.TextColumn("Válido Hasta")
+                    "Fecha_Validez": st.column_config.TextColumn("Válido Hasta"),
+                    "Tipo_Cotizacion": st.column_config.TextColumn("Tipo Servicio")
                 },
                 use_container_width=True,
                 hide_index=True
@@ -1579,7 +1703,6 @@ if check_password():
                                 val_ef = re.split(r'\b(?:RUT|R\.U\.T|Planta|Sucursal|Fecha)\b', val_ef, flags=re.IGNORECASE)[0].strip()
                                 st.session_state["doc_empresa"] = val_ef.upper()
 
-                            # --- PROCESAMIENTO LÍNEA POR LÍNEA PARA DISTINGUIR FECHAS CON EXACTITUD ---
                             lineas = [line.strip() for line in texto_fact_pdf.split('\n') if line.strip()]
                             
                             fecha_emi_hallada = None
@@ -1588,7 +1711,6 @@ if check_password():
                             for line in lineas:
                                 line_lower = line.lower()
                                 
-                                # 1. Búsqueda exclusiva de FECHA DE VENCIMIENTO por línea
                                 if any(kw in line_lower for kw in ['vencimiento', 'fch.venc', 'fch venc', 'fecha venc', 'vence']):
                                     m_v_txt = re.search(r'(\d{1,2})\s*de\s*([a-z]+)\s*del?\s*(\d{4})', line_lower)
                                     if m_v_txt:
@@ -1612,7 +1734,6 @@ if check_password():
                                             except Exception:
                                                 pass
 
-                                # 2. Búsqueda exclusiva de FECHA DE EMISIÓN por línea
                                 if any(kw in line_lower for kw in ['emision', 'emisión', 'fecha emi', 'fch.emis', 'fch emis']):
                                     m_e_txt = re.search(r'(\d{1,2})\s*de\s*([a-z]+)\s*del?\s*(\d{4})', line_lower)
                                     if m_e_txt:
@@ -1636,7 +1757,6 @@ if check_password():
                                             except Exception:
                                                 pass
 
-                            # Asignación estricta y diferenciada
                             st.session_state["doc_fecha_emi"] = fecha_emi_hallada
                             st.session_state["doc_fecha_venc"] = fecha_venc_hallada
 
