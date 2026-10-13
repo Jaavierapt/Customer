@@ -1408,7 +1408,7 @@ if check_password():
                 cot_tipo_servicio = st.radio(
                     "¿Es un servicio recurrente o puntual?",
                     ["PUNTUAL", "RECURRENTE"],
-                    index=0 if st.session_state["cot_tipo_servicio"] == "PUNTUAL" else 1,
+                    index=0 if st.session_state.get("cot_tipo_servicio", "PUNTUAL") == "PUNTUAL" else 1,
                     horizontal=True,
                     help="Las cotizaciones puntuales se incluyen en los KPIs de velocidad y eficiencia de facturación. Las recurrentes (ej: mantenimientos) se excluyen para evitar distorsiones."
                 )
@@ -1441,6 +1441,7 @@ if check_password():
 
                 if st.form_submit_button("💾 Guardar y Registrar Cotización"):
                     if cot_folio and cot_empresa:
+                        st.session_state["cot_tipo_servicio"] = cot_tipo_servicio
                         dict_guardar = {
                             "Folio": str(cot_folio).strip(),
                             "Empresa": cot_empresa.strip().upper(),
