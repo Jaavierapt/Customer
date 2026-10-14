@@ -344,7 +344,7 @@ def eliminar_ticket(id_ticket):
 # --- GESTIÓN DE COTIZACIONES (SUPABASE) ---
 @st.cache_data(ttl=30)
 def cargar_cotizaciones():
-    """Carga cotizaciones directamente desde Supabase convirtiendo fechas de forma ultra segura."""
+    """Carga cotizaciones directamente desde Supabase con normalización flexible de columnas."""
     df_c = pd.DataFrame()
     try:
         res = supabase.table("cotizaciones").select("*").execute()
@@ -364,6 +364,19 @@ def cargar_cotizaciones():
     if df_c.empty:
         return pd.DataFrame(columns=cols)
 
+    # Mapeo flexible de variaciones de nombres de columnas que puedan venir de Supabase
+    col_map_cot = {
+        "tipo_cotizacion": "Tipo_Cotizacion",
+        "tipo_servicio": "Tipo_Cotizacion",
+        "Tipo_Servicio": "Tipo_Cotizacion",
+        "TipoCotizacion": "Tipo_Cotizacion",
+        "folio": "Folio",
+        "empresa": "Empresa",
+        "planta": "Planta",
+        "estado": "Estado"
+    }
+    df_c = df_c.rename(columns={k: v for k, v in col_map_cot.items() if k in df_c.columns})
+
     for col in cols:
         if col not in df_c.columns:
             if col == "Tipo_Cotizacion":
@@ -371,7 +384,9 @@ def cargar_cotizaciones():
             else:
                 df_c[col] = ""
 
-    df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].fillna('PUNTUAL').replace('', 'PUNTUAL')
+    # Preservar valores válidos existentes sin forzar todo a PUNTUAL
+    df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].fillna('PUNTUAL').astype(str).str.strip().str.upper()
+    df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].replace({'': 'PUNTUAL', 'NONE': 'PUNTUAL', 'NAN': 'PUNTUAL'})
 
     if 'Moneda' not in df_c.columns or df_c['Moneda'].isnull().all():
         df_c['Moneda'] = 'CLP'
@@ -383,12 +398,16 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase descartando campos no soportados si aplica."""
-    if "Tipo_Cotizacion" not in dict_cot or not str(dict_cot.get("Tipo_Cotizacion", "")).strip():
-        dict_cot["Tipo_Cotizacion"] = "PUNTUAL"
-    else:
-        dict_cot["Tipo_Cotizacion"] = str(dict_cot["Tipo_Cotizacion"]).strip().upper()
+    """Guarda o actualiza cotización en Supabase intentando múltiples alias de columna para compatibilidad."""
+    val_tipo = str(dict_cot.get("Tipo_Cotizacion", "PUNTUAL")).strip().upper()
+    if not val_tipo or val_tipo in ["NONE", "NAN"]:
+        val_tipo = "PUNTUAL"
         
+    dict_cot["Tipo_Cotizacion"] = val_tipo
+    # Soporte preventivo por si la columna en Supabase se llama tipo_servicio o tipo_cotizacion
+    dict_cot["tipo_cotizacion"] = val_tipo
+    dict_cot["Tipo_Servicio"] = val_tipo
+
     for _ in range(3):
         try:
             supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
@@ -405,10 +424,10 @@ def guardar_cotizacion(dict_cot):
                 st.error(f"Error al guardar cotización en Supabase: {e}")
                 break
         
-    nom_c = dict_cot.get("Contacto", "").strip()
-    emp_c = dict_cot.get("Empresa", "").strip()
-    planta_c = dict_cot.get("Planta", "").strip()
-    em_c = dict_cot.get("Email_Contacto", "").strip()
+    nom_c = str(dict_cot.get("Contacto", "")).strip()
+    emp_c = str(dict_cot.get("Empresa", "")).strip()
+    planta_c = str(dict_cot.get("Planta", "")).strip()
+    em_c = str(dict_cot.get("Email_Contacto", "")).strip()
     monto_total = dict_cot.get("Monto_Total", 0)
     
     nombre_contacto_final = nom_c if nom_c else emp_c
@@ -425,7 +444,7 @@ def guardar_cotizacion(dict_cot):
             nombre=nombre_contacto_final,
             email=em_c,
             estado=estado_contacto,
-            telefono=dict_cot.get("Fono_Contacto", ""),
+            telefono=str(dict_cot.get("Fono_Contacto", "")),
             empresa=emp_c,
             planta=planta_c,
             valor=monto_total,
@@ -1115,7 +1134,6 @@ if check_password():
             df_cot_puntuales = df_cotizaciones[df_cotizaciones['Tipo_Cotizacion'].fillna('PUNTUAL').astype(str).str.upper() == 'PUNTUAL'].copy()
             
             if not df_cot_puntuales.empty:
-                # Filtrar facturas asociadas a cotizaciones
                 df_fact_validas = df[df['Fecha_Cotizacion'].notna() | df['Fecha_Emision'].notna()].copy() if not df.empty else pd.DataFrame()
                 
                 dias_cierre_lista = []
@@ -1128,14 +1146,12 @@ if check_password():
                         if pd.notna(f_cot_str) and str(f_cot_str).strip() not in ["", "None", "NaT"]:
                             dt_cot_emi = pd.to_datetime(f_cot_str, errors='coerce')
                             if pd.notna(dt_cot_emi):
-                                # Buscar factura vinculada por fecha de cotización o coincidencia de empresa/monto
                                 df_match_f = df_fact_validas[
                                     (df_fact_validas['Fecha_Cotizacion'] == dt_cot_emi) | 
                                     (df_fact_validas['Empresa'].str.upper() == emp_cot_str)
                                 ]
                                 
                                 if not df_match_f.empty:
-                                    # Tomar la fecha de emisión de factura más cercana o primera existente
                                     dt_fact_emi = df_match_f['Fecha_Emision'].dropna()
                                     if not dt_fact_emi.empty:
                                         primera_f_emi = dt_fact_emi.min()
@@ -1149,7 +1165,6 @@ if check_password():
                 ganadas_puntuales = len(df_cot_puntuales[df_cot_puntuales['Estado'].astype(str).str.upper().isin(['GANADO', 'APROBADA'])])
                 tasa_conv_puntual = round((ganadas_puntuales / total_puntuales * 100), 1) if total_puntuales > 0 else 0.0
 
-                # Detectar anomalías (Cotizaciones puntuales en PENDIENTE > 30 días)
                 hoy_dt = pd.Timestamp.now()
                 df_cot_puntuales['Fecha_Emision_DT'] = pd.to_datetime(df_cot_puntuales['Fecha_Emision'], errors='coerce')
                 df_cot_puntuales['Dias_Abierta'] = (hoy_dt - df_cot_puntuales['Fecha_Emision_DT']).dt.days
@@ -1405,14 +1420,13 @@ if check_password():
                     cot_f_emi = c_f1.date_input("Fecha Emisión", value=st.session_state["cot_fecha_emi"])
                     cot_f_val = c_f2.date_input("Válido Hasta (Validez Cotización)", value=st.session_state["cot_fecha_val"])
 
-                # --- CAMPO SOLICITADO: TIPO DE SERVICIO (PUNTUAL VS RECURRENTE) ---
                 st.subheader("2. Carácter y Tipo de Servicio")
                 cot_tipo_servicio = st.radio(
                     "¿Es un servicio recurrente o puntual?",
                     ["PUNTUAL", "RECURRENTE"],
                     index=0 if st.session_state["cot_tipo_servicio"] == "PUNTUAL" else 1,
                     horizontal=True,
-                    help="Las cotizaciones puntuales se incluyen en los KPIs de velocidad y eficiencia de facturación. Las recurrentes (ej: mantenimientos) se excluyen para evitar distorsiones."
+                    help="Las cotizaciones puntuales se incluyen en los KPIs de velocidad y eficiencia de facturación. Las recurrentes se excluyen."
                 )
 
                 st.divider()
@@ -1492,6 +1506,10 @@ if check_password():
                                 return fallback
                         return fallback
 
+                    # Lectura directa del estado actual sin asumir default a PUNTUAL
+                    tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
+                    idx_tipo = 1 if tipo_actual == "RECURRENTE" else 0
+
                     with st.form(f"form_edit_cot_{folio_cot_editar}"):
                         st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
                         ec_col1, ec_col2, ec_col3 = st.columns(3)
@@ -1517,10 +1535,6 @@ if check_password():
                             ec_f_emi = st.date_input("Fecha Emisión", value=parse_date_dynamic(row_c_edit.get('Fecha_Emision'), None))
                             ec_f_val = st.date_input("Válido Hasta (Validez Cotización)", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), None))
 
-                        # --- OPCIÓN PARA MODIFICAR TIPO DE SERVICIO EN COTIZACIONES EXISTENTES ---
-                        tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
-                        idx_tipo = 1 if tipo_actual == "RECURRENTE" else 0
-                        
                         ec_tipo_servicio = st.radio(
                             "Tipo de Servicio (Filtrado para KPIs):",
                             ["PUNTUAL", "RECURRENTE"],
@@ -1554,6 +1568,7 @@ if check_password():
                             c_iva_edit = int(round(ec_neto * 0.19))
                             c_total_edit = ec_neto + c_iva_edit
                             
+                            val_tipo_edit = str(ec_tipo_servicio).strip().upper()
                             dict_editado = {
                                 "Folio": str(folio_cot_editar).strip(),
                                 "Empresa": ec_empresa.strip().upper(),
@@ -1578,11 +1593,11 @@ if check_password():
                                 "Monto_IVA": c_iva_edit,
                                 "Monto_Total": c_total_edit,
                                 "Estado": ec_estado,
-                                "Tipo_Cotizacion": str(ec_tipo_servicio).strip().upper()
+                                "Tipo_Cotizacion": val_tipo_edit
                             }
                             guardar_cotizacion(dict_editado)
                             st.cache_data.clear()
-                            st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente a '{ec_tipo_servicio}'!")
+                            st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente a '{val_tipo_edit}'!")
                             st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para editar.")
