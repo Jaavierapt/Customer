@@ -364,7 +364,6 @@ def cargar_cotizaciones():
     if df_c.empty:
         return pd.DataFrame(columns=cols)
 
-    # Mapeo flexible de variaciones de nombres de columnas que puedan venir de Supabase
     col_map_cot = {
         "tipo_cotizacion": "Tipo_Cotizacion",
         "tipo_servicio": "Tipo_Cotizacion",
@@ -384,7 +383,6 @@ def cargar_cotizaciones():
             else:
                 df_c[col] = ""
 
-    # Preservar valores válidos existentes sin forzar todo a PUNTUAL
     df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].fillna('PUNTUAL').astype(str).str.strip().str.upper()
     df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].replace({'': 'PUNTUAL', 'NONE': 'PUNTUAL', 'NAN': 'PUNTUAL'})
 
@@ -398,14 +396,12 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase intentando múltiples alias de columna para compatibilidad."""
+    """Guarda o actualiza cotización en Supabase de forma directa y limpia."""
     val_tipo = str(dict_cot.get("Tipo_Cotizacion", "PUNTUAL")).strip().upper()
     if not val_tipo or val_tipo in ["NONE", "NAN"]:
         val_tipo = "PUNTUAL"
         
     dict_cot["Tipo_Cotizacion"] = val_tipo
-    dict_cot["tipo_cotizacion"] = val_tipo
-    dict_cot["Tipo_Servicio"] = val_tipo
 
     for _ in range(3):
         try:
@@ -1505,14 +1501,9 @@ if check_password():
                                 return fallback
                         return fallback
 
-                    # Sincronización precisa con la selección del formulario
-                    key_radio_tipo = f"edit_tipo_serv_{folio_cot_editar}"
-                    tipo_db_val = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
-                    if tipo_db_val not in ["PUNTUAL", "RECURRENTE"]:
-                        tipo_db_val = "PUNTUAL"
-
-                    if key_radio_tipo not in st.session_state:
-                        st.session_state[key_radio_tipo] = tipo_db_val
+                    # Lectura directa e inequívoca del tipo guardado
+                    tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
+                    idx_tipo_actual = 1 if tipo_actual == "RECURRENTE" else 0
 
                     with st.form(f"form_edit_cot_{folio_cot_editar}"):
                         st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
@@ -1542,7 +1533,7 @@ if check_password():
                         ec_tipo_servicio = st.radio(
                             "Tipo de Servicio (Filtrado para KPIs):",
                             ["PUNTUAL", "RECURRENTE"],
-                            key=key_radio_tipo,
+                            index=idx_tipo_actual,
                             horizontal=True
                         )
 
@@ -1599,8 +1590,6 @@ if check_password():
                                 "Tipo_Cotizacion": val_tipo_edit
                             }
                             guardar_cotizacion(dict_editado)
-                            # Forzar la actualización del estado de sesión local para reflejo inmediato
-                            st.session_state[key_radio_tipo] = val_tipo_edit
                             st.cache_data.clear()
                             st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente a '{val_tipo_edit}'!")
                             st.rerun()
