@@ -393,22 +393,35 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase enviando las variantes del nombre de columna."""
+    """Guarda o actualiza cotización en Supabase eliminando automáticamente columnas inexistentes si Supabase las rechaza."""
     val_tipo = str(dict_cot.get("Tipo_Cotizacion", "PUNTUAL")).strip().upper()
     if not val_tipo or val_tipo in ["NONE", "NAN"]:
         val_tipo = "PUNTUAL"
         
+    # Asignar únicamente Tipo_Cotizacion
     dict_cot["Tipo_Cotizacion"] = val_tipo
-    dict_cot["tipo_cotizacion"] = val_tipo
-    dict_cot["Tipo_Servicio"] = val_tipo
 
-    try:
-        supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
-        st.cache_data.clear()
-        st.toast(f"✅ Cotización Folio {dict_cot.get('Folio')} guardada como {val_tipo}", icon="💾")
-    except Exception as e:
-        st.error(f"❌ Error de Supabase al guardar la cotización: {e}")
+    # Bucle de reintentos con descarte automático de columnas inválidas
+    payload = dict_cot.copy()
+    for _ in range(5):
+        try:
+            supabase.table("cotizaciones").upsert(payload, on_conflict="Folio").execute()
+            st.cache_data.clear()
+            st.toast(f"✅ Cotización Folio {payload.get('Folio')} guardada como {val_tipo}", icon="💾")
+            break
+        except Exception as err:
+            err_msg = str(err)
+            # Detecta si Supabase rechaza una columna por no existir en el esquema
+            match = re.search(r"Could not find the '([^']+)' column", err_msg)
+            if match:
+                col_err = match.group(1)
+                payload.pop(col_err, None)
+                continue
+            else:
+                st.error(f"❌ Error al guardar en Supabase: {err}")
+                break
 
+    # Sincronizar contacto en CRM
     nom_c = str(dict_cot.get("Contacto", "")).strip()
     emp_c = str(dict_cot.get("Empresa", "")).strip()
     planta_c = str(dict_cot.get("Planta", "")).strip()
