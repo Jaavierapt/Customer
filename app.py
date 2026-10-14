@@ -404,7 +404,6 @@ def guardar_cotizacion(dict_cot):
         val_tipo = "PUNTUAL"
         
     dict_cot["Tipo_Cotizacion"] = val_tipo
-    # Soporte preventivo por si la columna en Supabase se llama tipo_servicio o tipo_cotizacion
     dict_cot["tipo_cotizacion"] = val_tipo
     dict_cot["Tipo_Servicio"] = val_tipo
 
@@ -1506,9 +1505,14 @@ if check_password():
                                 return fallback
                         return fallback
 
-                    # Lectura directa del estado actual sin asumir default a PUNTUAL
-                    tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
-                    idx_tipo = 1 if tipo_actual == "RECURRENTE" else 0
+                    # Sincronización precisa con la selección del formulario
+                    key_radio_tipo = f"edit_tipo_serv_{folio_cot_editar}"
+                    tipo_db_val = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
+                    if tipo_db_val not in ["PUNTUAL", "RECURRENTE"]:
+                        tipo_db_val = "PUNTUAL"
+
+                    if key_radio_tipo not in st.session_state:
+                        st.session_state[key_radio_tipo] = tipo_db_val
 
                     with st.form(f"form_edit_cot_{folio_cot_editar}"):
                         st.subheader(f"Modificar Cotización Folio #{folio_cot_editar}")
@@ -1538,9 +1542,8 @@ if check_password():
                         ec_tipo_servicio = st.radio(
                             "Tipo de Servicio (Filtrado para KPIs):",
                             ["PUNTUAL", "RECURRENTE"],
-                            index=idx_tipo,
-                            horizontal=True,
-                            key=f"edit_tipo_serv_{folio_cot_editar}"
+                            key=key_radio_tipo,
+                            horizontal=True
                         )
 
                         ec_glosa = st.text_area("Glosa", value=str(row_c_edit.get('Glosa', '')))
@@ -1596,6 +1599,8 @@ if check_password():
                                 "Tipo_Cotizacion": val_tipo_edit
                             }
                             guardar_cotizacion(dict_editado)
+                            # Forzar la actualización del estado de sesión local para reflejo inmediato
+                            st.session_state[key_radio_tipo] = val_tipo_edit
                             st.cache_data.clear()
                             st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente a '{val_tipo_edit}'!")
                             st.rerun()
