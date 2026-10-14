@@ -384,8 +384,10 @@ def cargar_cotizaciones():
 
 def guardar_cotizacion(dict_cot):
     """Guarda o actualiza cotización en Supabase descartando campos no soportados si aplica."""
-    if "Tipo_Cotizacion" not in dict_cot or not dict_cot["Tipo_Cotizacion"]:
+    if "Tipo_Cotizacion" not in dict_cot or not str(dict_cot.get("Tipo_Cotizacion", "")).strip():
         dict_cot["Tipo_Cotizacion"] = "PUNTUAL"
+    else:
+        dict_cot["Tipo_Cotizacion"] = str(dict_cot["Tipo_Cotizacion"]).strip().upper()
         
     for _ in range(3):
         try:
@@ -1408,7 +1410,7 @@ if check_password():
                 cot_tipo_servicio = st.radio(
                     "¿Es un servicio recurrente o puntual?",
                     ["PUNTUAL", "RECURRENTE"],
-                    index=0 if st.session_state.get("cot_tipo_servicio", "PUNTUAL") == "PUNTUAL" else 1,
+                    index=0 if st.session_state["cot_tipo_servicio"] == "PUNTUAL" else 1,
                     horizontal=True,
                     help="Las cotizaciones puntuales se incluyen en los KPIs de velocidad y eficiencia de facturación. Las recurrentes (ej: mantenimientos) se excluyen para evitar distorsiones."
                 )
@@ -1441,7 +1443,6 @@ if check_password():
 
                 if st.form_submit_button("💾 Guardar y Registrar Cotización"):
                     if cot_folio and cot_empresa:
-                        st.session_state["cot_tipo_servicio"] = cot_tipo_servicio
                         dict_guardar = {
                             "Folio": str(cot_folio).strip(),
                             "Empresa": cot_empresa.strip().upper(),
@@ -1466,11 +1467,12 @@ if check_password():
                             "Monto_IVA": calc_iva,
                             "Monto_Total": calc_total,
                             "Estado": "PENDIENTE",
-                            "Tipo_Cotizacion": cot_tipo_servicio
+                            "Tipo_Cotizacion": str(cot_tipo_servicio).strip().upper()
                         }
                         guardar_cotizacion(dict_guardar)
                         st.cache_data.clear()
                         st.success(f"¡Cotización Folio N° {cot_folio} ({cot_tipo_servicio}) guardada exitosamente!")
+                        st.rerun()
                     else:
                         st.warning("Por favor ingresa el Folio y Nombre de Empresa.")
 
@@ -1516,11 +1518,13 @@ if check_password():
                             ec_f_val = st.date_input("Válido Hasta (Validez Cotización)", value=parse_date_dynamic(row_c_edit.get('Fecha_Validez'), None))
 
                         # --- OPCIÓN PARA MODIFICAR TIPO DE SERVICIO EN COTIZACIONES EXISTENTES ---
-                        tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).upper()
+                        tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
+                        idx_tipo = 1 if tipo_actual == "RECURRENTE" else 0
+                        
                         ec_tipo_servicio = st.radio(
                             "Tipo de Servicio (Filtrado para KPIs):",
                             ["PUNTUAL", "RECURRENTE"],
-                            index=0 if tipo_actual == "PUNTUAL" else 1,
+                            index=idx_tipo,
                             horizontal=True,
                             key=f"edit_tipo_serv_{folio_cot_editar}"
                         )
@@ -1544,7 +1548,9 @@ if check_password():
                         ec_detalle = ed_col3.text_input("Detalle Servicio", value=str(row_c_edit.get('Detalle_Servicio', '')))
                         ec_neto = ed_col4.number_input("Monto Neto", min_value=0, step=100 if ec_moneda == "USD" else 1000, value=int(row_c_edit.get('Monto_Neto', 0)))
 
-                        if st.form_submit_button("💾 Guardar Cambios en Cotización"):
+                        btn_guardar_edit = st.form_submit_button("💾 Guardar Cambios en Cotización")
+
+                        if btn_guardar_edit:
                             c_iva_edit = int(round(ec_neto * 0.19))
                             c_total_edit = ec_neto + c_iva_edit
                             
@@ -1572,11 +1578,12 @@ if check_password():
                                 "Monto_IVA": c_iva_edit,
                                 "Monto_Total": c_total_edit,
                                 "Estado": ec_estado,
-                                "Tipo_Cotizacion": ec_tipo_servicio
+                                "Tipo_Cotizacion": str(ec_tipo_servicio).strip().upper()
                             }
                             guardar_cotizacion(dict_editado)
                             st.cache_data.clear()
-                            st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente!")
+                            st.success(f"¡Cotización Folio N° {folio_cot_editar} actualizada exitosamente a '{ec_tipo_servicio}'!")
+                            st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para editar.")
 
@@ -1593,6 +1600,7 @@ if check_password():
                         eliminar_cotizacion(folio_cot_del)
                         st.cache_data.clear()
                         st.success(f"Cotización Folio #{folio_cot_del} eliminada con éxito de Supabase.")
+                        st.rerun()
             else:
                 st.info("No hay cotizaciones registradas para eliminar.")
 
@@ -2010,6 +2018,7 @@ if check_password():
                                 )
                             
                             st.success(f"¡Factura #{n_factura} guardada y sincronizada exitosamente!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
                     else:
@@ -2130,6 +2139,7 @@ if check_password():
                                 
                                 st.cache_data.clear()
                                 st.success(f"¡Factura #{factura_a_editar} actualizada exitosamente!")
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"Error al actualizar la factura en Supabase: {e}")
             else:
@@ -2148,6 +2158,7 @@ if check_password():
                         if eliminar_factura(factura_a_eliminar):
                             st.cache_data.clear()
                             st.success(f"Factura #{factura_a_eliminar} eliminada exitosamente de Supabase.")
+                            st.rerun()
             else:
                 st.info("No hay facturas registradas para eliminar.")
 
@@ -2253,6 +2264,7 @@ if check_password():
                         st.error(f"Error al actualizar factura {fac_num}: {e}")
                 st.cache_data.clear()
                 st.success("¡Estados actualizados exitosamente en Supabase!")
+                st.rerun()
 
         st.divider()
 
@@ -2329,6 +2341,7 @@ if check_password():
                         guardar_contacto(nombre, correo, estado, celular, empresa, planta, valor, rol)
                         st.cache_data.clear()
                         st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
+                        st.rerun()
                     else:
                         st.warning("Por favor completa al menos el Nombre o Empresa.")
       
@@ -2419,6 +2432,7 @@ if check_password():
                                 )
                                 st.cache_data.clear()
                                 st.success("¡Tarjeta actualizada en la nube!")
+                                st.rerun()
 
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
@@ -2446,6 +2460,7 @@ if check_password():
                                     )
                                     st.cache_data.clear()
                                     st.success("¡Interacción registrada en la nube!")
+                                    st.rerun()
                                 else:
                                     st.warning("Escribe un detalle para la interacción.")
                        
@@ -2480,6 +2495,7 @@ if check_password():
                                 )
                                 st.cache_data.clear()
                                 st.success("¡Bitácora sincronizada en Supabase!")
+                                st.rerun()
                         with col_b2:
                             nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
                             if nuevo_estado_rapido != row['Estado']:
@@ -2495,6 +2511,7 @@ if check_password():
                                     bitacora=nota_actual
                                 )
                                 st.cache_data.clear()
+                                st.rerun()
 
                     with st.expander(f"⏱ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
                         filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row.get('Nombre')]
@@ -2507,6 +2524,7 @@ if check_password():
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
                         eliminar_contacto(correo_contacto)
                         st.cache_data.clear()
+                        st.rerun()
 
         st.divider()
 
@@ -2663,6 +2681,7 @@ if check_password():
                         guardar_ticket(dict_tk)
                         st.cache_data.clear()
                         st.success(f"¡Ticket #{nuevo_id} registrado y publicado globalmente!")
+                        st.rerun()
                     else:
                         st.warning("Escribe un asunto para el ticket.")
 
@@ -2716,6 +2735,7 @@ if check_password():
                             guardar_ticket(dict_tk_edit)
                             st.cache_data.clear()
                             st.success(f"¡Ticket #{id_tk_editar} actualizado exitosamente!")
+                            st.rerun()
             else:
                 st.info("No hay tickets registrados para editar.")
 
@@ -2730,6 +2750,7 @@ if check_password():
                         eliminar_ticket(id_tk_del)
                         st.cache_data.clear()
                         st.success(f"Ticket #{id_tk_del} eliminado correctamente.")
+                        st.rerun()
             else:
                 st.info("No hay tickets registrados para eliminar.")
 
@@ -2774,3 +2795,4 @@ if check_password():
                         )
                         st.cache_data.clear()
                         st.success("¡Contacto actualizado con éxito en Supabase!")
+                        st.rerun()
