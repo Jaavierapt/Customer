@@ -344,7 +344,7 @@ def eliminar_ticket(id_ticket):
 # --- GESTIÓN DE COTIZACIONES (SUPABASE) ---
 @st.cache_data(ttl=30)
 def cargar_cotizaciones():
-    """Carga cotizaciones directamente desde Supabase con normalización flexible de columnas."""
+    """Carga cotizaciones directamente desde Supabase sin sobrescribir valores existentes."""
     df_c = pd.DataFrame()
     try:
         res = supabase.table("cotizaciones").select("*").execute()
@@ -378,10 +378,7 @@ def cargar_cotizaciones():
 
     for col in cols:
         if col not in df_c.columns:
-            if col == "Tipo_Cotizacion":
-                df_c[col] = "PUNTUAL"
-            else:
-                df_c[col] = ""
+            df_c[col] = "PUNTUAL" if col == "Tipo_Cotizacion" else ""
 
     df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].fillna('PUNTUAL').astype(str).str.strip().str.upper()
     df_c['Tipo_Cotizacion'] = df_c['Tipo_Cotizacion'].replace({'': 'PUNTUAL', 'NONE': 'PUNTUAL', 'NAN': 'PUNTUAL'})
@@ -396,29 +393,22 @@ def cargar_cotizaciones():
     return df_c
 
 def guardar_cotizacion(dict_cot):
-    """Guarda o actualiza cotización en Supabase de forma directa y limpia."""
+    """Guarda o actualiza cotización en Supabase enviando las variantes del nombre de columna."""
     val_tipo = str(dict_cot.get("Tipo_Cotizacion", "PUNTUAL")).strip().upper()
     if not val_tipo or val_tipo in ["NONE", "NAN"]:
         val_tipo = "PUNTUAL"
         
     dict_cot["Tipo_Cotizacion"] = val_tipo
+    dict_cot["tipo_cotizacion"] = val_tipo
+    dict_cot["Tipo_Servicio"] = val_tipo
 
-    for _ in range(3):
-        try:
-            supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
-            st.cache_data.clear()
-            break
-        except Exception as e:
-            err_msg = str(e)
-            match = re.search(r"Could not find the '([^']+)' column", err_msg)
-            if match:
-                col_err = match.group(1)
-                dict_cot.pop(col_err, None)
-                continue
-            else:
-                st.error(f"Error al guardar cotización en Supabase: {e}")
-                break
-        
+    try:
+        supabase.table("cotizaciones").upsert(dict_cot, on_conflict="Folio").execute()
+        st.cache_data.clear()
+        st.toast(f"✅ Cotización Folio {dict_cot.get('Folio')} guardada como {val_tipo}", icon="💾")
+    except Exception as e:
+        st.error(f"❌ Error de Supabase al guardar la cotización: {e}")
+
     nom_c = str(dict_cot.get("Contacto", "")).strip()
     emp_c = str(dict_cot.get("Empresa", "")).strip()
     planta_c = str(dict_cot.get("Planta", "")).strip()
@@ -1501,7 +1491,6 @@ if check_password():
                                 return fallback
                         return fallback
 
-                    # Lectura directa e inequívoca del tipo guardado
                     tipo_actual = str(row_c_edit.get('Tipo_Cotizacion', 'PUNTUAL')).strip().upper()
                     idx_tipo_actual = 1 if tipo_actual == "RECURRENTE" else 0
 
