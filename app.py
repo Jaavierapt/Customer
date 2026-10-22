@@ -271,20 +271,19 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not exito:
         st.error(f"Detalle técnico de Supabase: {ultimo_error}")
         
-def eliminar_contacto(email):
-    """Elimina permanentemente un contacto desde Supabase."""
-    try:
-        supabase.table("Contactos").delete().eq("Email", str(email).lower()).execute()
+    def eliminar_contacto(correo):
+       """Elimina un contacto de la tabla Contactos en Supabase según su correo."""
+      try:
+        if not correo:
+            return
+        for col in ["Email", "email", "Correo", "correo"]:
+            try:
+                supabase.table("Contactos").delete().eq(col, str(correo).strip().lower()).execute()
+            except Exception:
+                pass
         st.cache_data.clear()
-        return True
-    except Exception:
-        try:
-            supabase.table("Contactos").delete().eq("email", str(email).lower()).execute()
-            st.cache_data.clear()
-            return True
-        except Exception as e:
-            st.error(f"Error al eliminar contacto de Supabase: {e}")
-            return False
+    except Exception as e:
+        st.error(f"Error al eliminar el contacto: {e}")
 
 # --- GESTIÓN DE INTERACCIONES EN NUBE ---
 @st.cache_data(ttl=30)
