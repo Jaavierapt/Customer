@@ -279,8 +279,12 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     # Si todo falla, lanza explícitamente el error de la imagen
     if not exito:
         import streamlit as st
-        st.error("No se pudo guardar el contacto debido a incompatibilidad en el esquema de Supabase.")
-
+        try:
+            detalle_error = err_msg
+        except NameError:
+            detalle_error = "Conflicto de clave única o error de conexión."
+        st.error(f"Detalle técnico de Supabase: {detalle_error}")
+        
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
     try:
