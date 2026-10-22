@@ -2475,9 +2475,13 @@ if check_password():
                     nombre_contacto = row.get('Nombre', 'Cliente')
                    
                     val_correo = correo_contacto.iloc[0] if hasattr(correo_contacto, "iloc") else correo_contacto
-    if isinstance(val_correo, (list, tuple)):
-        val_correo = val_correo[0] if len(val_correo) > 0 else ""
-    val_correo_str = str(val_correo).strip()
+                if isinstance(val_correo, (list, tuple)):
+                    val_correo = val_correo[0] if len(val_correo) > 0 else ""
+                    val_correo_str = str(val_correo).strip()
+
+    if pd.notna(val_correo) and val_correo_str != "" and "@" in val_correo_str and not val_correo_str.endswith(".local"):
+        asunto = f"Seguimiento de Propuesta / Proyecto - Itelcam"
+        cuerpo = f"Hola {nombre_contacto},\n\nEspero que te encuentres muy bien."
 
     if pd.notna(val_correo) and val_correo_str != "" and "@" in val_correo_str and not val_correo_str.endswith(".local"):
                        
