@@ -271,9 +271,9 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not exito:
         st.error(f"Detalle técnico de Supabase: {ultimo_error}")
         
-    def eliminar_contacto(correo):
-       """Elimina un contacto de la tabla Contactos en Supabase según su correo."""
-      try:
+def eliminar_contacto(correo):
+    """Elimina un contacto de la tabla Contactos en Supabase según su correo."""
+    try:
         if not correo:
             return
         for col in ["Email", "email", "Correo", "correo"]:
