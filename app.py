@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto en Supabase garantizando compatibilidad de columnas y claves."""
+    """Inserta o actualiza un contacto en Supabase asegurando el tipo de datos correcto."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -202,33 +202,35 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
 
     email_clean = str(email).strip().lower()
     if not email_clean or "@" not in email_clean:
-        slug_nom = nom_final.lower().replace(" ", ".") if nom_final else "contacto"
-        slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
+        slug_nom = nom_final.lower().replace(" ", ".").replace("ñ", "n")
+        slug_emp = str(empresa).strip().lower().replace(" ", "").replace("ñ", "n") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
-    # Estructura del registro con variantes para asegurar coincidencia de nombres de columnas
+    # Construcción de estructura asegurando tipos de datos compatibles
     payload = {
         "Nombre": nom_final,
         "Email": email_clean,
-        "Correo": email_clean,
         "Estado": str(estado).strip() if estado else "Propuesta",
-        "Telefono": str(telefono).strip(),
-        "Celular": str(telefono).strip(),
         "Valor": int(valor) if valor else 0,
         "Rol": str(rol).strip() if rol else "Influenciador",
-        "Rol_Contacto": str(rol).strip() if rol else "Influenciador",
         "Bitacora": str(bitacora).strip()
     }
+
+    # Solo se agrega teléfono/celular si contiene caracteres válidos (para evitar descalces si la columna en Supabase es int/bigint)
+    tel_clean = re.sub(r'[^\d+]', '', str(telefono))
+    if tel_clean:
+        payload["Telefono"] = tel_clean
+        payload["Celular"] = tel_clean
 
     if empresa:
         payload["Empresa"] = str(empresa).strip().upper()
     if planta:
         payload["Planta"] = str(planta).strip().upper()
 
-    # Intento de guardado en Supabase descarando automáticamente columnas inexistentes en la tabla
+    # Intento de guardado en Supabase descartando automáticamente columnas no existentes o incompatibles
     for _ in range(6):
         try:
-            supabase.table("Contactos").upsert(payload).execute()
+            supabase.table("Contactos").upsert(payload, on_conflict="Email").execute()
             st.cache_data.clear()
             return True
         except Exception as err:
@@ -238,15 +240,15 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
                 col_err = match.group(1)
                 payload.pop(col_err, None)
                 continue
-            else:
-                # Intento alternativo sin upsert si falla por clave única
-                try:
-                    supabase.table("Contactos").insert(payload).execute()
-                    st.cache_data.clear()
-                    return True
-                except Exception as inner_err:
-                    st.error(f"Error al guardar contacto en Supabase: {inner_err}")
-                    return False
+            
+            # Si falla por conflicto de clave primaria o sintaxis de tipos
+            try:
+                supabase.table("Contactos").insert(payload).execute()
+                st.cache_data.clear()
+                return True
+            except Exception as inner_err:
+                st.error(f"Error al guardar contacto en Supabase: {inner_err}")
+                return False
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
