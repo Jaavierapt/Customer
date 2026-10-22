@@ -432,10 +432,8 @@ def guardar_cotizacion(dict_cot):
     if not val_tipo or val_tipo in ["NONE", "NAN"]:
         val_tipo = "PUNTUAL"
         
-    # Asignar únicamente Tipo_Cotizacion
     dict_cot["Tipo_Cotizacion"] = val_tipo
 
-    # Bucle de reintentos con descarte automático de columnas inválidas
     payload = dict_cot.copy()
     for _ in range(5):
         try:
@@ -445,7 +443,6 @@ def guardar_cotizacion(dict_cot):
             break
         except Exception as err:
             err_msg = str(err)
-            # Detecta si Supabase rechaza una columna por no existir en el esquema
             match = re.search(r"Could not find the '([^']+)' column", err_msg)
             if match:
                 col_err = match.group(1)
@@ -455,7 +452,6 @@ def guardar_cotizacion(dict_cot):
                 st.error(f"❌ Error al guardar en Supabase: {err}")
                 break
 
-    # Sincronizar contacto en CRM
     nom_c = str(dict_cot.get("Contacto", "")).strip()
     emp_c = str(dict_cot.get("Empresa", "")).strip()
     planta_c = str(dict_cot.get("Planta", "")).strip()
@@ -970,13 +966,13 @@ if check_password():
                 st.info("ℹ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
         else:
             st.info("ℹ Columnas necesarias no disponibles.")
-            
+          
         st.divider()
 
     with tab2:
         container_filtros = st.container()
         with container_filtros:
-            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")     
+            st.subheader("Análisis Jerárquico de Ingresos Reales por Empresa y Planta")   
             c_emp1, c_emp2 = st.columns(2)
             df_pagados_tab2 = df.dropna(subset=['Fecha_Pago'])
             for anio, col in zip([2025, 2026], [c_emp1, c_emp2]):
@@ -993,7 +989,7 @@ if check_password():
                     else:
                         st.info(f"No hay pagos registrados para {anio}")
             st.divider()
-            
+          
             empresas_unicas = sorted([e for e in df['Empresa'].unique() if e])
             empresa_sel = st.selectbox("Selecciona Empresa:", empresas_unicas if empresas_unicas else ["SIN REGISTRO"], key="filtro_estatico_empresa")
             plantas_disponibles = sorted([p for p in df[df['Empresa'] == empresa_sel]['Planta'].unique() if p])
@@ -1014,7 +1010,7 @@ if check_password():
                     else:
                         st.write(f"Sin pagos en {anio}")
             st.divider()
-            
+          
             st.subheader(f"📑 Propuestas y Cotizaciones Emitidas - {empresa_sel} ({planta_sel})")
             if not df_cotizaciones.empty:
                 df_c_planta = df_cotizaciones[(df_cotizaciones['Empresa'].str.upper() == empresa_sel.upper()) & (df_cotizaciones['Planta'].str.upper() == planta_sel.upper())]
@@ -1100,7 +1096,7 @@ if check_password():
 
         st.subheader("📊 Análisis de Ventas Cruzadas (2026)")
         df_2026 = df.dropna(subset=['Fecha_Pago'])[df.dropna(subset=['Fecha_Pago'])['Año'] == 2026].copy()
-        
+          
         col_serv_2026 = 'Grupo Servicio' if 'Grupo Servicio' in df_2026.columns else ('Grupo_Servicio' if 'Grupo_Servicio' in df_2026.columns else None)
         if not col_serv_2026:
             df_2026['Grupo Servicio'] = ''
@@ -1144,7 +1140,7 @@ if check_password():
                         return 'Clase B (Medio Impacto)'
                     else:
                         return 'Clase C (Bajo Impacto)'
-                        
+                      
                 df_abc['Categoria'] = df_abc['Porcentaje_Acumulado'].apply(asignar_abc)
                 df_abc_disp = df_abc[['Empresa', 'Monto', 'Categoria']].copy()
                 df_abc_disp['Monto'] = df_abc_disp['Monto'].apply(lambda x: f"${int(x):,.0f}".replace(",", "."))
@@ -1159,22 +1155,21 @@ if check_password():
     with tab_cot:
         st.header("📑 Gestión de Cotizaciones")
 
-        # --- SECCIÓN DE KPIS DE EFICIENCIA (EXCLUSIVA DE COTIZACIONES PUNTUALES) ---
         st.subheader("⚡ KPIs de Eficiencia Comercial (Solo Servicios Puntuales)")
-        
+          
         if not df_cotizaciones.empty:
             df_cot_puntuales = df_cotizaciones[df_cotizaciones['Tipo_Cotizacion'].fillna('PUNTUAL').astype(str).str.upper() == 'PUNTUAL'].copy()
-            
+              
             if not df_cot_puntuales.empty:
                 df_fact_validas = df[df['Fecha_Cotizacion'].notna() | df['Fecha_Emision'].notna()].copy() if not df.empty else pd.DataFrame()
-                
+                  
                 dias_cierre_lista = []
                 if not df_fact_validas.empty:
                     for _, r_cot in df_cot_puntuales.iterrows():
                         f_cot_str = r_cot.get('Fecha_Emision')
                         fol_cot_str = str(r_cot.get('Folio', '')).strip()
                         emp_cot_str = str(r_cot.get('Empresa', '')).strip().upper()
-                        
+                          
                         if pd.notna(f_cot_str) and str(f_cot_str).strip() not in ["", "None", "NaT"]:
                             dt_cot_emi = pd.to_datetime(f_cot_str, errors='coerce')
                             if pd.notna(dt_cot_emi):
@@ -1192,7 +1187,7 @@ if check_password():
                                             dias_cierre_lista.append(dias)
 
                 prom_dias_cierre = round(sum(dias_cierre_lista) / len(dias_cierre_lista), 1) if dias_cierre_lista else 0.0
-                
+              
                 total_puntuales = len(df_cot_puntuales)
                 ganadas_puntuales = len(df_cot_puntuales[df_cot_puntuales['Estado'].astype(str).str.upper().isin(['GANADO', 'APROBADA'])])
                 tasa_conv_puntual = round((ganadas_puntuales / total_puntuales * 100), 1) if total_puntuales > 0 else 0.0
@@ -1200,7 +1195,7 @@ if check_password():
                 hoy_dt = pd.Timestamp.now()
                 df_cot_puntuales['Fecha_Emision_DT'] = pd.to_datetime(df_cot_puntuales['Fecha_Emision'], errors='coerce')
                 df_cot_puntuales['Dias_Abierta'] = (hoy_dt - df_cot_puntuales['Fecha_Emision_DT']).dt.days
-                
+              
                 anomalias_puntuales = df_cot_puntuales[
                     (df_cot_puntuales['Estado'].astype(str).str.upper() == 'PENDIENTE') & 
                     (df_cot_puntuales['Dias_Abierta'] > 30)
@@ -1550,14 +1545,14 @@ if check_password():
                             ec_rut = st.text_input("RUT Cliente", value=str(row_c_edit.get('RUT_Empresa', '')))
                             ec_planta = st.text_input("Planta", value=str(row_c_edit.get('Planta', '')))
                             ec_condicion = st.selectbox("Condición de Pago", ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"],
-                                                               index=["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"].index(row_c_edit.get('Condicion_Pago', 'Contado CLP')) if row_c_edit.get('Condicion_Pago') in ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"] else 0)
+                                                       index=["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"].index(row_c_edit.get('Condicion_Pago', 'Contado CLP')) if row_c_edit.get('Condicion_Pago') in ["Contado CLP", "Crédito 30 días", "Crédito 60 días", "Transferencia / Chq"] else 0)
                         
                         with ec_col2:
                             ec_contacto = st.text_input("Contacto Cliente", value=str(row_c_edit.get('Contacto', '')))
                             ec_email_cont = st.text_input("Email Contacto", value=str(row_c_edit.get('Email_Contacto', '')))
                             ec_fono_cont = st.text_input("Fono Contacto", value=str(row_c_edit.get('Fono_Contacto', '')))
                             ec_estado = st.selectbox("Estado", ["PENDIENTE", "GANADO", "RECHAZADA"], 
-                                                     index=["PENDIENTE", "GANADO", "RECHAZADA"].index(row_c_edit.get('Estado', 'PENDIENTE')) if row_c_edit.get('Estado') in ["PENDIENTE", "GANADO", "RECHAZADA"] else 0)
+                                                   index=["PENDIENTE", "GANADO", "RECHAZADA"].index(row_c_edit.get('Estado', 'PENDIENTE')) if row_c_edit.get('Estado') in ["PENDIENTE", "GANADO", "RECHAZADA"] else 0)
 
                         with ec_col3:
                             ec_ejecutivo = st.text_input("Ejecutivo", value=str(row_c_edit.get('Ejecutivo', '')))
@@ -1975,7 +1970,6 @@ if check_password():
             if cot_seleccionada != "--- Sin Enlace ---":
                 st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot'] if st.session_state['doc_fecha_cot'] else 'Sin Fecha'})")
 
-            # --- OPCIONAL: ENLAZAR CON CONTACTO DE LA BASE DE DATOS DEL CRM ---
             st.markdown("### 👤 Enlazar con Contacto Existente del CRM (Opcional)")
             contactos_factura_list = ["--- Sin Enlace Directo a Contacto ---"]
             if not df_contactos.empty:
@@ -2069,7 +2063,6 @@ if check_password():
                             if cot_seleccionada != "--- Sin Enlace ---":
                                 marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
                             
-                            # Actualizar o Enlazar Contacto en Supabase
                             if contacto_factura_sel != "--- Sin Enlace Directo a Contacto ---" and not df_contactos.empty:
                                 nombre_cont_ext = contacto_factura_sel.split(" (")[0].strip()
                                 row_match_cont = df_contactos[df_contactos['Nombre'].astype(str).str.strip() == nombre_cont_ext]
@@ -2086,16 +2079,16 @@ if check_password():
                                         rol=str(r_c_fact.get('Rol_Contacto', 'Finanzas / Compras')),
                                         bitacora=str(r_c_fact.get('Bitacora', ''))
                                     )
-                            else:
-                                guardar_contacto(
-                                    nombre=n_empresa_ins.strip().upper(),
-                                    email="",
-                                    estado="Ganado",
-                                    empresa=n_empresa_ins.strip().upper(),
-                                    planta=n_planta_ins.strip().upper() if n_planta_ins else "",
-                                    valor=int(n_monto),
-                                    rol="Finanzas / Compras"
-                                )
+                                else:
+                                    guardar_contacto(
+                                        nombre=n_empresa_ins.strip().upper(),
+                                        email="",
+                                        estado="Ganado",
+                                        empresa=n_empresa_ins.strip().upper(),
+                                        planta=n_planta_ins.strip().upper() if n_planta_ins else "",
+                                        valor=int(n_monto),
+                                        rol="Finanzas / Compras"
+                                    )
                             
                             st.success(f"¡Factura #{n_factura} guardada y sincronizada exitosamente!")
                             st.rerun()
@@ -2332,7 +2325,7 @@ if check_password():
                     required=True,
                 )
             }
-            
+          
             df_editado = st.data_editor(
                 df[columnas_esenciales],
                 column_config=configuracion_columnas,
@@ -2475,21 +2468,19 @@ if check_password():
                     nombre_contacto = row.get('Nombre', 'Cliente')
                    
                     val_correo = correo_contacto.iloc[0] if hasattr(correo_contacto, "iloc") else correo_contacto
-                if isinstance(val_correo, (list, tuple)):
-                    val_correo = val_correo[0] if len(val_correo) > 0 else ""
+                    if isinstance(val_correo, (list, tuple)):
+                        val_correo = val_correo[0] if len(val_correo) > 0 else ""
                     val_correo_str = str(val_correo).strip()
 
-    if pd.notna(val_correo) and val_correo_str != "" and "@" in val_correo_str and not val_correo_str.endswith(".local"):
-        asunto = f"Seguimiento de Propuesta / Proyecto - Itelcam"
-        cuerpo = f"Hola {nombre_contacto},\n\nEspero que te encuentres muy bien."
+                    if pd.notna(val_correo) and val_correo_str != "" and "@" in val_correo_str and not val_correo_str.endswith(".local"):
+                        asunto = f"Seguimiento de Propuesta / Proyecto - Itelcam"
+                        cuerpo = f"Hola {nombre_contacto},\n\nEspero que te encuentres muy bien."
 
-    if pd.notna(val_correo) and val_correo_str != "" and "@" in val_correo_str and not val_correo_str.endswith(".local"):
-                       
                         import urllib.parse
                         asunto_enc = urllib.parse.quote(asunto)
                         cuerpo_enc = urllib.parse.quote(cuerpo)
                        
-                        mailto_link = f"mailto:{correo_contacto}?subject={asunto_enc}&body={cuerpo_enc}"
+                        mailto_link = f"mailto:{val_correo_str}?subject={asunto_enc}&body={cuerpo_enc}"
                        
                         st.markdown(
                             f"""
@@ -2507,7 +2498,7 @@ if check_password():
                             qe_nombre = st.text_input("Nombre", value=str(row.get('Nombre', '')))
                             qe_empresa = st.text_input("Empresa", value=str(row.get('Empresa', '')))
                             qe_planta = st.text_input("Planta", value=str(row.get('Planta', '')))
-                            qe_correo = st.text_input("Correo", value=str(correo_contacto) if not str(correo_contacto).endswith(".local") else "")
+                            qe_correo = st.text_input("Correo", value=str(val_correo_str) if not val_correo_str.endswith(".local") else "")
                             qe_celular = st.text_input("Celular", value=str(row.get('Celular', '')))
                             
                             roles_op = ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"]
@@ -2580,7 +2571,7 @@ if check_password():
                             if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
                                 guardar_contacto(
                                     nombre=row['Nombre'],
-                                    email=correo_contacto,
+                                    email=val_correo_str,
                                     estado=row['Estado'],
                                     telefono=row.get('Celular', ''),
                                     empresa=row.get('Empresa', ''),
@@ -2603,7 +2594,7 @@ if check_password():
                             if nuevo_estado_rapido != row['Estado']:
                                 guardar_contacto(
                                     nombre=row['Nombre'],
-                                    email=correo_contacto,
+                                    email=val_correo_str,
                                     estado=nuevo_estado_rapido,
                                     telefono=row.get('Celular', ''),
                                     empresa=row.get('Empresa', ''),
@@ -2624,7 +2615,7 @@ if check_password():
                             st.caption("No hay interacciones registradas aún.")
 
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
-                        eliminar_contacto(correo_contacto)
+                        eliminar_contacto(val_correo_str)
                         st.cache_data.clear()
                         st.rerun()
 
@@ -2736,11 +2727,8 @@ if check_password():
 
         st.divider()
 
-        # =====================================================================
-        # MÓDULO UNIVERSAL DE SOPORTE Y TICKETS (CREAR, EDITAR, ELIMINAR, VINCULAR)
-        # =====================================================================
         st.subheader("🛠️ Módulo Universal de Soporte y Tickets (Helpdesk)")
-        
+          
         lista_contactos_opciones = ["--- Sin Contacto Específico ---"]
         if not df_contactos.empty:
             for _, r_cont in df_contactos.iterrows():
