@@ -2420,8 +2420,8 @@ if check_password():
 
                 submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
 
-                if submitted:
-    if (nombre or empresa):
+    if submitted:
+     if (nombre or empresa):
         exito = guardar_contacto(
             nombre=nombre,
             email=correo,
@@ -2438,8 +2438,6 @@ if check_password():
             st.rerun()
     else:
         st.warning("Por favor completa al menos el Nombre o Empresa.")
-      
-        st.divider()
 
         st.subheader("📊 Gráfico de Conversión de Oportunidades")
         conteo_estados = df_contactos['Estado'].value_counts().reindex(estados).fillna(0).reset_index()
