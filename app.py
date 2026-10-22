@@ -63,7 +63,7 @@ def cargar_datos():
             "Factura", "Empresa", "Planta", "Grupo_Servicio", "Servicio", 
             "Monto", "Moneda", "dias_programados", "dias_reales", "Fecha_Cotizacion", 
             "Fecha_OC", "Fecha_Emision", "Fecha_Vencimiento", "Fecha_GES", 
-            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes"
+            "Fecha_Pago", "Semaforo", "Estado", "Requiere_GES", "Año", "Mes", "Cotizacion"
         ])
         
     df = pd.DataFrame(data)
@@ -1077,12 +1077,12 @@ if check_password():
         st.write("### Identificación de Venta Cruzada")
         servicios_disponibles = [s for s in df_2026['Grupo Servicio'].unique() if s] if not df_2026.empty else []
         servicio_target = st.selectbox("Selecciona un servicio para buscar clientes potenciales:", servicios_disponibles if servicios_disponibles else ["SIN SERVICIO"], key="select_servicio_target_cruzada")
-             
+              
         clientes_con_servicio = df_2026[df_2026['Grupo Servicio'] == servicio_target]['Empresa'].unique() if not df_2026.empty else []
         todos_los_clientes = df_2026['Empresa'].unique()
-             
+              
         clientes_potenciales = [c for c in todos_los_clientes if c not in clientes_con_servicio and c]
-             
+              
         if clientes_potenciales:
             st.success(f"Empresas que podrían contratar **{servicio_target}**:")
             df_potencial = pd.DataFrame(clientes_potenciales, columns=["Empresas sin este servicio"])
@@ -2008,7 +2008,8 @@ if check_password():
                             "Estado": n_estado_pago,
                             "Requiere_GES": n_req_ges,
                             "Ano": anio_val,
-                            "Mes": mes_val
+                            "Mes": mes_val,
+                            "Cotizacion": str(cot_seleccionada).strip() if cot_seleccionada != "--- Sin Enlace ---" else None
                         }
                         
                         try:
@@ -2141,6 +2142,8 @@ if check_password():
                                 "Ano": anio_val,
                                 "Mes": mes_val
                             }
+                            if e_cot_seleccionada != "--- Sin Enlace ---":
+                                registro_actualizado["Cotizacion"] = str(e_cot_seleccionada).strip()
 
                             try:
                                 supabase.table("ingresos").update(registro_actualizado).eq("Factura", str(factura_a_editar)).execute()
@@ -2212,6 +2215,9 @@ if check_password():
                 simb_str = "$" if mon_str == "CLP" else "US$"
                 monto_det_str = f"{simb_str}{int(row_det.get('Monto', 0)):,.0f}".replace(",", ".")
                 
+                cot_num = str(row_det.get('Cotizacion', '')).strip()
+                cot_num_str = f"#{cot_num}" if cot_num and cot_num not in ["None", "nan", "NaT", ""] else "N/A"
+                
                 with st.expander(f"📂 Información Detallada: Factura #{row_det.get('Factura', 'N/A')} - {row_det.get('Empresa', 'N/A')}", expanded=True):
                     dc1, dc2, dc3 = st.columns(3)
                      
@@ -2226,6 +2232,7 @@ if check_password():
                         st.markdown(f"**Desviación de Ejecución:** {desviacion:+g} días")
                          
                     with dc2:
+                        st.markdown(f"**Cotización Asociada:** {cot_num_str}")
                         st.markdown(f"**Fecha Cotización:** {str(row_det.get('Fecha_Cotizacion', 'N/A')).split(' ')[0]}")
                         st.markdown(f"**Fecha Orden de Compra (OC):** {str(row_det.get('Fecha_OC', 'N/A')).split(' ')[0]}")
                         st.markdown(f"**Fecha Emisión Factura:** {str(row_det.get('Fecha_Emision', 'N/A')).split(' ')[0]}")
