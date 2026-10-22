@@ -2860,17 +2860,46 @@ if check_password():
 
         with st.expander("✏ Editar contactos existentes"):
             for idx, row in df_contactos.iterrows():
+                # Función auxiliar para asegurar que obtengamos un valor escalar y no una Serie
+                def _get_scalar(val, default=""):
+                    if isinstance(val, pd.Series):
+                        val = val.iloc[0] if not val.empty else default
+                    if pd.isna(val):
+                        return default
+                    return val
+
+                nombre_val = str(_get_scalar(row.get('Nombre', row.get('nombre', '')), ''))
+                empresa_val = str(_get_scalar(row.get('Empresa', row.get('empresa', '')), ''))
+                planta_val = str(_get_scalar(row.get('Planta', row.get('planta', '')), ''))
+                correo_val = str(_get_scalar(row.get('Correo', row.get('correo', row.get('Email', row.get('email', '')))), ''))
+                celular_val = str(_get_scalar(row.get('Celular', row.get('celular', row.get('Telefono', row.get('telefono', '')))), ''))
+                estado_val = str(_get_scalar(row.get('Estado', row.get('estado', '')), 'Prospecto'))
+                rol_val = str(_get_scalar(row.get('Rol_Contacto', row.get('rol_contacto', row.get('Rol', row.get('rol', 'Influenciador')))), 'Influenciador'))
+                
+                val_raw = _get_scalar(row.get('Valor', row.get('valor', 0)), 0)
+                try:
+                    valor_val = int(val_raw) if pd.notna(val_raw) else 0
+                except:
+                    valor_val = 0
+                    
+                bitacora_val = str(_get_scalar(row.get('Bitacora', row.get('bitacora', '')), ''))
+
                 with st.form(f"edit_{idx}"):
-                    st.write(f"Editando: {row['Nombre']}")
-                    n_nombre = st.text_input("Nombre", row['Nombre'])
-                    n_empresa = st.text_input("Empresa", row['Empresa'])
-                    n_planta = st.text_input("Planta", row.get('Planta', ''))
-                    n_correo = st.text_input("Correo", row.get('Correo', ''))
-                    n_celular = st.text_input("Celular", row.get('Celular', ''))
-                    n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0)
-                    n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
-                    n_valor = st.number_input("Valor", value=int(row['Valor']) if pd.notna(row['Valor']) else 0, min_value=0, step=1000)
-                    n_bitacora = st.text_area("Bitácora / Notas", value=str(row.get('Bitacora', '')))
+                    st.write(f"Editando: {nombre_val if nombre_val else empresa_val}")
+                    n_nombre = st.text_input("Nombre", nombre_val, key=f"ed_nom_{idx}")
+                    n_empresa = st.text_input("Empresa", empresa_val, key=f"ed_emp_{idx}")
+                    n_planta = st.text_input("Planta", planta_val, key=f"ed_plan_{idx}")
+                    n_correo = st.text_input("Correo", correo_val, key=f"ed_corr_{idx}")
+                    n_celular = st.text_input("Celular", celular_val, key=f"ed_cel_{idx}")
+                    
+                    n_estado = st.selectbox("Estado", estados, index=estados.index(estado_val) if estado_val in estados else 0, key=f"ed_est_{idx}")
+                    
+                    roles_opts = ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"]
+                    idx_rol = roles_opts.index(rol_val) if rol_val in roles_opts else 1
+                    n_rol = st.selectbox("Rol en la Cuenta", roles_opts, index=idx_rol, key=f"ed_rol_{idx}")
+                    
+                    n_valor = st.number_input("Valor", value=valor_val, min_value=0, step=1000, key=f"ed_val_{idx}")
+                    n_bitacora = st.text_area("Bitácora / Notas", value=bitacora_val, key=f"ed_bit_{idx}")
                     
                     if st.form_submit_button("💾 Guardar Cambios"):
                         guardar_contacto(
