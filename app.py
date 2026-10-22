@@ -206,8 +206,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
-    # Diccionario masivo con todas las posibles convenciones de esquema (minúsculas, mayúsculas, nombres alternativos)
-    # Esto asegura que sin importar cómo esté creada la DB, encuentre su columna y registre los datos (como la Bitácora)
     payload = {
         "Nombre": nom_final, "nombre": nom_final,
         "Email": email_clean, "email": email_clean,
@@ -229,36 +227,30 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         payload["planta"] = str(planta).strip().upper()
 
     exito = False
-    
-    # Probaremos varios posibles nombres de columna primaria para el on_conflict
+    ultimo_error = "Error desconocido de conexión o esquema."
     conflict_cols = ["email", "Email", "correo", "Correo"]
     
     for conflict in conflict_cols:
         temp_payload = payload.copy()
-        
-        for _ in range(30):  # 30 intentos para asegurar que limpie todas las variaciones que sobren en tu esquema
+        for _ in range(30):
             try:
                 if conflict not in temp_payload:
-                    break  # Si la columna de conflicto ya fue eliminada, probar la siguiente variante
-                    
+                    break
                 supabase.table("Contactos").upsert(temp_payload, on_conflict=conflict).execute()
                 st.cache_data.clear()
                 exito = True
                 break
             except Exception as err:
-                err_msg = str(err)
-                match = re.search(r"Could not find the '([^']+)' column", err_msg)
+                ultimo_error = str(err)
+                match = re.search(r"Could not find the '([^']+)' column", ultimo_error)
                 if match:
                     col_err = match.group(1)
                     temp_payload.pop(col_err, None)
                     continue
-                # Si es un error distinto, salimos y probamos el otro candidato de conflict_col
                 break
-        
         if exito:
             break
 
-    # Si el upsert falla por completo (ej: falta clave única), intentar insert directo
     if not exito:
         temp_payload = payload.copy()
         for _ in range(30):
@@ -268,22 +260,16 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
                 exito = True
                 break
             except Exception as err:
-                err_msg = str(err)
-                match = re.search(r"Could not find the '([^']+)' column", err_msg)
+                ultimo_error = str(err)
+                match = re.search(r"Could not find the '([^']+)' column", ultimo_error)
                 if match:
                     col_err = match.group(1)
                     temp_payload.pop(col_err, None)
                     continue
                 break
 
-    # Si todo falla, lanza explícitamente el error de la imagen
     if not exito:
-        import streamlit as st
-        try:
-            detalle_error = err_msg
-        except NameError:
-            detalle_error = "Conflicto de clave única o error de conexión."
-        st.error(f"Detalle técnico de Supabase: {detalle_error}")
+        st.error(f"Detalle técnico de Supabase: {ultimo_error}")
         
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
