@@ -213,6 +213,7 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         "Telefono": str(telefono).strip(),
         "Valor": int(valor) if valor else 0,
         "Rol": str(rol).strip() if rol else "Influenciador",
+        "Bitacora": str(bitacora).strip()
     }
 
     if empresa:
@@ -693,11 +694,11 @@ def generar_pdf(df_original):
             df_anio = df[df['Año'] == anio]
         else:
             df_anio = df
-           
+            
         if not df_anio.empty:
             if 'Empresa' in df_anio.columns:
                 agregar_grafico_empresa_por_anio(pdf, df_anio, anio)
-               
+                
             if 'Grupo Servicio' in df_anio.columns:
                 agregar_grafico_servicio_por_anio(pdf, df_anio, anio)
 
@@ -722,7 +723,7 @@ if check_password():
         st.write(f"**Usuario:** {st.session_state['user_email']}")
         st.write(f"**Rol:** {st.session_state['role'].upper()}")
         st.write("---")
-       
+        
         if st.button("📥 Descargar Reporte PDF"):
             df_pdf = cargar_datos()
             st.download_button("📥 Confirmar Descarga PDF", data=generar_pdf(df_pdf), file_name="CRM_Itelcam.pdf", mime="application/pdf")
@@ -732,7 +733,7 @@ if check_password():
             registrar_log("Sincronización de datos realizada")
             st.success("¡Datos sincronizados exitosamente desde Supabase!")
             st.rerun()
-       
+        
         if st.button("🚪 Cerrar Sesión"):
             st.session_state["logged_in"] = False
             st.rerun()
@@ -912,7 +913,7 @@ if check_password():
             df_historico_mensual = df_pagados[df_pagados['Año'].isin([2025, 2026])].dropna(subset=['Mes']).groupby(['Empresa', 'Año', 'Mes'])['Monto'].sum().reset_index()
             df_2025 = df_historico_mensual[df_historico_mensual['Año'] == 2025]
             df_2026 = df_historico_mensual[df_historico_mensual['Año'] == 2026]
-           
+            
             if not df_2025.empty and not df_2026.empty:
                 df_churn_comparativa = pd.merge(
                     df_2026, df_2025,
@@ -921,7 +922,7 @@ if check_password():
                 )
                 df_churn_comparativa['Variacion_%'] = ((df_churn_comparativa['Monto_2026'] - df_churn_comparativa['Monto_2025']) / df_churn_comparativa['Monto_2025']) * 100
                 clientes_en_riesgo = df_churn_comparativa[df_churn_comparativa['Variacion_%'] <= -30.0]
-               
+                
                 if not clientes_en_riesgo.empty:
                     st.error(f"⚠️ Se detectó **riesgo de abandono** en **{len(clientes_en_riesgo)} registros mensuales de pagos**...")
                     df_churn_display = clientes_en_riesgo[['Empresa', 'Mes', 'Monto_2025', 'Monto_2026', 'Variacion_%']].copy()
@@ -936,7 +937,7 @@ if check_password():
                 st.info("ℹ Se requieren datos pagados de 2025 y 2026 para el análisis de churn.")
         else:
             st.info("ℹ Columnas necesarias no disponibles.")
-           
+            
         st.divider()
 
     with tab2:
@@ -1941,6 +1942,22 @@ if check_password():
             if cot_seleccionada != "--- Sin Enlace ---":
                 st.info(f"💡 Datos vinculados desde Cotización Folio **#{cot_seleccionada}** (Fecha Cotización: {st.session_state['doc_fecha_cot'] if st.session_state['doc_fecha_cot'] else 'Sin Fecha'})")
 
+            # --- OPCIONAL: ENLAZAR CON CONTACTO DE LA BASE DE DATOS DEL CRM ---
+            st.markdown("### 👤 Enlazar con Contacto Existente del CRM (Opcional)")
+            contactos_factura_list = ["--- Sin Enlace Directo a Contacto ---"]
+            if not df_contactos.empty:
+                for _, r_cont in df_contactos.iterrows():
+                    nom_c = str(r_cont.get('Nombre', '')).strip()
+                    emp_c = str(r_cont.get('Empresa', '')).strip()
+                    if nom_c or emp_c:
+                        contactos_factura_list.append(f"{nom_c} ({emp_c})".strip())
+
+            contacto_factura_sel = st.selectbox(
+                "Seleccionar Contacto Guardado para Enlazar Factura:",
+                options=contactos_factura_list,
+                key="select_contacto_to_factura"
+            )
+
             with st.form("form_nueva_factura", clear_on_submit=True):
                 fc1, fc2 = st.columns(2)
                 with fc1:
@@ -2018,6 +2035,24 @@ if check_password():
                             
                             if cot_seleccionada != "--- Sin Enlace ---":
                                 marcar_cotizacion_como_ganada(cot_seleccionada, n_empresa_ins.strip().upper(), n_planta_ins.strip().upper(), int(n_monto))
+                            
+                            # Actualizar o Enlazar Contacto en Supabase
+                            if contacto_factura_sel != "--- Sin Enlace Directo a Contacto ---" and not df_contactos.empty:
+                                nombre_cont_ext = contacto_factura_sel.split(" (")[0].strip()
+                                row_match_cont = df_contactos[df_contactos['Nombre'].astype(str).str.strip() == nombre_cont_ext]
+                                if not row_match_cont.empty:
+                                    r_c_fact = row_match_cont.iloc[0]
+                                    guardar_contacto(
+                                        nombre=str(r_c_fact.get('Nombre', '')),
+                                        email=str(r_c_fact.get('Correo', r_c_fact.get('email', ''))),
+                                        estado="Ganado",
+                                        telefono=str(r_c_fact.get('Celular', r_c_fact.get('telefono', ''))),
+                                        empresa=n_empresa_ins.strip().upper(),
+                                        planta=n_planta_ins.strip().upper() if n_planta_ins else str(r_c_fact.get('Planta', '')),
+                                        valor=int(n_monto),
+                                        rol=str(r_c_fact.get('Rol_Contacto', 'Finanzas / Compras')),
+                                        bitacora=str(r_c_fact.get('Bitacora', ''))
+                                    )
                             else:
                                 guardar_contacto(
                                     nombre=n_empresa_ins.strip().upper(),
@@ -2351,12 +2386,23 @@ if check_password():
                 estado = c2.selectbox("Estado del Cliente", estados)
                 rol = c1.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"])
                 valor = c2.number_input("Valor", min_value=0, step=1000, value=0)
+                bitacora_ini = st.text_area("Notas / Bitácora inicial")
 
                 submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
 
                 if submitted:
                     if (nombre or empresa):
-                        guardar_contacto(nombre, correo, estado, celular, empresa, planta, valor, rol)
+                        guardar_contacto(
+                            nombre=nombre,
+                            email=correo,
+                            estado=estado,
+                            telefono=celular,
+                            empresa=empresa,
+                            planta=planta,
+                            valor=valor,
+                            rol=rol,
+                            bitacora=bitacora_ini
+                        )
                         st.cache_data.clear()
                         st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
                         st.rerun()
@@ -2798,6 +2844,7 @@ if check_password():
                     n_estado = st.selectbox("Estado", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0)
                     n_rol = st.selectbox("Rol en la Cuenta", ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"], index=0 if row.get('Rol_Contacto') not in ["Influenciador", "Técnico / Operativo", "Finanzas / Compras"] else ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"].index(row.get('Rol_Contacto', 'Influenciador')))
                     n_valor = st.number_input("Valor", value=int(row['Valor']) if pd.notna(row['Valor']) else 0, min_value=0, step=1000)
+                    n_bitacora = st.text_area("Bitácora / Notas", value=str(row.get('Bitacora', '')))
                     
                     if st.form_submit_button("💾 Guardar Cambios"):
                         guardar_contacto(
@@ -2809,7 +2856,7 @@ if check_password():
                             planta=n_planta,
                             valor=n_valor,
                             rol=n_rol,
-                            bitacora=str(row.get('Bitacora', ''))
+                            bitacora=n_bitacora
                         )
                         st.cache_data.clear()
                         st.success("¡Contacto actualizado con éxito en Supabase!")
