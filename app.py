@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto en Supabase asegurando el tipo de datos correcto."""
+    """Inserta o actualiza un contacto en Supabase corrigiendo descalces de tipos y nombres de columnas."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -206,7 +206,10 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         slug_emp = str(empresa).strip().lower().replace(" ", "").replace("ñ", "n") if empresa else "itelcam"
         email_clean = f"{slug_nom}@{slug_emp}.local"
 
-    # Construcción de estructura asegurando tipos de datos compatibles
+    # 1. Limpieza estricta de teléfono para evitar 'invalid input syntax for type bigint'
+    tel_numerico = re.sub(r'[^\d]', '', str(telefono)) if telefono else ""
+
+    # 2. Construcción de payload con nombres de columnas estándar en Supabase
     payload = {
         "Nombre": nom_final,
         "Email": email_clean,
@@ -216,39 +219,53 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         "Bitacora": str(bitacora).strip()
     }
 
-    # Solo se agrega teléfono/celular si contiene caracteres válidos (para evitar descalces si la columna en Supabase es int/bigint)
-    tel_clean = re.sub(r'[^\d+]', '', str(telefono))
-    if tel_clean:
-        payload["Telefono"] = tel_clean
-        payload["Celular"] = tel_clean
+    if tel_numerico:
+        try:
+            payload["Telefono"] = int(tel_numerico) if len(tel_numerico) <= 15 else tel_numerico
+        except ValueError:
+            payload["Telefono"] = str(telefono).strip()
 
     if empresa:
         payload["Empresa"] = str(empresa).strip().upper()
     if planta:
         payload["Planta"] = str(planta).strip().upper()
 
-    # Intento de guardado en Supabase descartando automáticamente columnas no existentes o incompatibles
-    for _ in range(6):
+    # 3. Intento de guardado en Supabase descartando dinámicamente columnas incompatibles
+    for intento in range(6):
         try:
-            supabase.table("Contactos").upsert(payload, on_conflict="Email").execute()
+            # Intento principal con upsert
+            res = supabase.table("Contactos").upsert(payload).execute()
             st.cache_data.clear()
             return True
         except Exception as err:
             err_msg = str(err)
+            
+            # Si una columna no existe en la tabla, la eliminamos y reintentamos
             match = re.search(r"Could not find the '([^']+)' column", err_msg)
             if match:
                 col_err = match.group(1)
                 payload.pop(col_err, None)
                 continue
             
-            # Si falla por conflicto de clave primaria o sintaxis de tipos
+            # Si el tipo de dato falla en una columna específica, probamos sin ella
+            if "invalid input syntax" in err_msg:
+                if "Telefono" in payload:
+                    payload.pop("Telefono", None)
+                    continue
+                if "Valor" in payload and "int" in err_msg:
+                    payload.pop("Valor", None)
+                    continue
+
+            # Intento secundario mediante inserción directa si falla el conflicto de clave
             try:
                 supabase.table("Contactos").insert(payload).execute()
                 st.cache_data.clear()
                 return True
             except Exception as inner_err:
-                st.error(f"Error al guardar contacto en Supabase: {inner_err}")
-                return False
+                if intento == 5:
+                    st.error(f"❌ Error al guardar en Supabase: {inner_err}")
+                    return False
+    return False
 
 def eliminar_contacto(email):
     """Elimina permanentemente un contacto desde Supabase."""
@@ -2404,23 +2421,23 @@ if check_password():
                 submitted = st.form_submit_button("💾 Guardar Registro (Sincronizado a Nube)")
 
                 if submitted:
-                    if (nombre or empresa):
-                        guardar_contacto(
-                            nombre=nombre,
-                            email=correo,
-                            estado=estado,
-                            telefono=celular,
-                            empresa=empresa,
-                            planta=planta,
-                            valor=valor,
-                            rol=rol,
-                            bitacora=bitacora_ini
-                        )
-                        st.cache_data.clear()
-                        st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
-                        st.rerun()
-                    else:
-                        st.warning("Por favor completa al menos el Nombre o Empresa.")
+    if (nombre or empresa):
+        exito = guardar_contacto(
+            nombre=nombre,
+            email=correo,
+            estado=estado,
+            telefono=celular,
+            empresa=empresa,
+            planta=planta,
+            valor=valor,
+            rol=rol,
+            bitacora=bitacora_ini
+        )
+        if exito:
+            st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
+            st.rerun()
+    else:
+        st.warning("Por favor completa al menos el Nombre o Empresa.")
       
         st.divider()
 
