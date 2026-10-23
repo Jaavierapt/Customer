@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto en Supabase de forma segura usando un identificador único por nombre y empresa."""
+    """Inserta o actualiza un contacto en Supabase limpiando automáticamente las columnas que no existan en la tabla."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -202,7 +202,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
 
     emp_final = str(empresa).strip().upper() if empresa else "SIN EMPRESA"
     
-    # Generamos un identificador único interno para evitar que se pisen registros sin correo
     slug_id = f"{nom_final.lower().replace(' ', '_')}_{emp_final.lower().replace(' ', '_')}"
 
     email_clean = str(email).strip().lower()
@@ -226,13 +225,12 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
 
     exito = False
     ultimo_error = "Error desconocido de conexión o esquema."
-    
-    # Intentamos hacer upsert priorizando el correo real o el identificador único
     conflict_cols = ["email", "Email", "correo", "Correo"]
     
     for conflict in conflict_cols:
         temp_payload = payload.copy()
-        for _ in range(5):
+        # Bucle de reintentos ampliado para limpiar una a una las columnas que falten en Supabase
+        for _ in range(15):
             try:
                 supabase.table("Contactos").upsert(temp_payload, on_conflict=conflict).execute()
                 st.cache_data.clear()
@@ -243,7 +241,10 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
                 match = re.search(r"Could not find the '([^']+)' column", ultimo_error)
                 if match:
                     col_err = match.group(1)
-                    temp_payload.pop(col_err, None)
+                    # Eliminamos cualquier variante (mayúscula/minúscula) de la columna que Supabase rechazó
+                    keys_to_remove = [k for k in temp_payload.keys() if k.lower() == col_err.lower()]
+                    for k in keys_to_remove:
+                        temp_payload.pop(k, None)
                     continue
                 break
         if exito:
@@ -251,6 +252,8 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
 
     if not exito:
         st.error(f"Detalle técnico de Supabase al guardar contacto: {ultimo_error}")
+    else:
+        st.success("¡Contacto guardado con éxito!")
         
 def eliminar_contacto(correo):
     """Elimina un contacto específico de la tabla Contactos en Supabase según su correo exacto."""
