@@ -207,7 +207,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not email_clean or "@" not in email_clean:
         email_clean = f"{slug_id}@itelcam.local"
 
-    # Preparamos todas las posibles variantes de nombres de columnas para asegurar compatibilidad
     payload = {
         "Nombre": nom_final, "nombre": nom_final,
         "Email": email_clean, "email": email_clean,
@@ -224,20 +223,15 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     }
 
     try:
-        # 1. Verificamos si el contacto ya existe por su correo
         existing = supabase.table("Contactos").select("*").or_(f"email.eq.{email_clean},Correo.eq.{email_clean}").execute()
-        
         temp_payload = payload.copy()
         
-        # Bucle para auto-limpiar columnas que no existan físicamente en tu tabla de Supabase
         for _ in range(15):
             try:
                 if existing.data and len(existing.data) > 0:
-                    # Si existe, actualizamos el registro
                     supabase.table("Contactos").update(temp_payload).or_(f"email.eq.{email_clean},Correo.eq.{email_clean}").execute()
                     st.success("¡Contacto actualizado correctamente en Supabase!")
                 else:
-                    # Si no existe, insertamos uno nuevo
                     supabase.table("Contactos").insert(temp_payload).execute()
                     st.success("¡Contacto guardado con éxito!")
                 break
@@ -253,6 +247,7 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
                 raise err
 
         st.cache_data.clear()
+        st.rerun() # <-- Esto recarga la app inmediatamente para mostrar el contacto nuevo
     except Exception as e:
         st.error(f"Detalle técnico de Supabase al guardar contacto: {e}")
         
