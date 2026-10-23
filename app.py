@@ -185,17 +185,10 @@ def cargar_contactos():
 
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
-def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Guarda un contacto en Supabase de forma segura."""
-    try:
-        df_fact = cargar_datos()
-        if not df_fact.empty and 'Empresa' in df_fact.columns:
-            empresas_facturadas = set(df_fact['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
-            if str(empresa).strip().upper() in empresas_facturadas:
-                estado = "Ganado"
-    except Exception:
-        pass
-
+def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora="", contacto_id=None):
+    """Guarda o actualiza un contacto respetando su estado, calculando calificación y evitando duplicados."""
+    
+    # 1. Limpieza y formateo de datos
     nom_final = str(nombre).strip() if nombre else str(empresa).strip().upper()
     if not nom_final:
         nom_final = "Contacto Sin Nombre"
@@ -207,26 +200,53 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not email_clean or "@" not in email_clean:
         email_clean = f"{slug_id}@itelcam.local"
 
+    val = int(valor) if valor else 0
+    # ¡CORRECCIÓN!: Se respeta estrictamente el estado seleccionado por el usuario
+    estado_final = str(estado).strip() if estado else "Propuesta"
+
+    # ¡CORRECCIÓN!: Cálculo de Calificación para que no quede vacío
+    calificacion = "Baja"
+    if val >= 2000000 or estado_final in ["Ganado", "Propuesta"]:
+        calificacion = "Alta"
+    elif val >= 800000 or estado_final == "Contacto":
+        calificacion = "Media"
+
+    # Mapeo exacto para Supabase
     payload = {
         "Nombre": nom_final,
         "Correo": email_clean,
         "email": email_clean,
-        "Estado": str(estado).strip() if estado else "Propuesta",
+        "Estado": estado_final,
         "Celular": str(telefono).strip(),
-        "Valor": int(valor) if valor else 0,
+        "Valor": val,
         "Rol en la Cuenta": str(rol).strip() if rol else "Influenciador",
         "bitacora": str(bitacora).strip(),
         "Empresa": emp_final,
-        "Planta": str(planta).strip().upper()
+        "Planta": str(planta).strip().upper(),
+        "Calificacion": calificacion
     }
 
     try:
-        # Insertar directamente en Supabase
-        response = supabase.table("Contactos").insert(payload).execute()
-        st.success("¡Contacto guardado con éxito en Supabase y en el CRM!")
-    except Exception as err:
-        st.error(f"Error al guardar en Supabase: {err}")
+        # ¡CORRECCIÓN!: Lógica anti-duplicados
+        # Si no se pasó un ID desde Streamlit, buscamos si el correo ya existe en la base de datos
+        if not contacto_id:
+            busqueda = supabase.table("Contactos").select("id").eq("Correo", email_clean).execute()
+            if busqueda.data and len(busqueda.data) > 0:
+                contacto_id = busqueda.data[0]["id"]
 
+        if contacto_id:
+            # Si existe un ID (ya sea pasado por parámetro o encontrado), ACTUALIZAMOS la versión existente
+            supabase.table("Contactos").update(payload).eq("id", contacto_id).execute()
+            st.success(f"¡Contacto '{nom_final}' actualizado correctamente en '{estado_final}'!")
+        else:
+            # Si definitivamente no existe, INSERTAMOS uno nuevo
+            supabase.table("Contactos").insert(payload).execute()
+            st.success(f"¡Contacto '{nom_final}' creado correctamente en '{estado_final}'!")
+            
+    except Exception as err:
+        st.error(f"Error al procesar en Supabase: {err}")
+
+    # Limpiar caché para que los gráficos del CRM lean los nuevos datos de inmediato
     st.cache_data.clear()
     st.rerun()
         
