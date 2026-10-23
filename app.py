@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import time
 import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
@@ -175,8 +176,6 @@ def cargar_contactos():
                 if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
                     empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
                     mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
-                    # Comentado para evitar que sobrescriba el estado visualmente en la tabla a 'Ganado' cuando no se desea
-                    # df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
             except Exception:
                 pass
 
@@ -186,10 +185,9 @@ def cargar_contactos():
 
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
-def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora="", contacto_id=None):
-    """Guarda o actualiza un contacto respetando estrictamente su estado, calculando calificación y evitando duplicados."""
+def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora="", correo_original=None, nombre_original=None, empresa_original=None):
+    """Guarda o actualiza un contacto usando su correo o nombre/empresa original para evitar fallos por ID inexistente."""
     
-    # 1. Limpieza y formateo de datos
     nom_final = str(nombre).strip() if nombre else str(empresa).strip().upper()
     if not nom_final:
         nom_final = "Contacto Sin Nombre"
@@ -202,52 +200,89 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         email_clean = f"{slug_id}@itelcam.local"
 
     val = int(valor) if valor else 0
-    
-    # 2. Respetar estrictamente el estado seleccionado
     estado_final = str(estado).strip() if estado else "Propuesta"
 
-    # 3. Cálculo automático de Calificación
     calificacion = "Baja"
     if val >= 2000000 or estado_final in ["Ganado", "Propuesta"]:
         calificacion = "Alta"
     elif val >= 800000 or estado_final == "Contacto":
         calificacion = "Media"
 
-    # 4. Mapeo exacto de columnas para Supabase
     payload = {
-        "Nombre": nom_final,
-        "Correo": email_clean,
-        "email": email_clean,
-        "Estado": estado_final,
-        "Celular": str(telefono).strip(),
-        "Valor": val,
-        "Rol en la Cuenta": str(rol).strip() if rol else "Influenciador",
-        "bitacora": str(bitacora).strip(),
-        "Empresa": emp_final,
-        "Planta": str(planta).strip().upper(),
-        "Calificacion": calificacion
+        "Nombre": nom_final, "nombre": nom_final,
+        "Correo": email_clean, "email": email_clean,
+        "Estado": estado_final, "estado": estado_final,
+        "Celular": str(telefono).strip(), "telefono": str(telefono).strip(),
+        "Valor": val, "valor": val,
+        "Rol_Contacto": str(rol).strip() if rol else "Influenciador",
+        "rol": str(rol).strip() if rol else "Influenciador",
+        "Bitacora": str(bitacora).strip(), "bitacora": str(bitacora).strip(),
+        "Empresa": emp_final, "empresa": emp_final,
+        "Planta": str(planta).strip().upper(), "planta": str(planta).strip().upper(),
+        "Calificacion": calificacion, "calificacion": calificacion
     }
 
-    try:
-        # 5. Lógica estricta anti-duplicados
-        if not contacto_id:
-            busqueda = supabase.table("Contactos").select("id").eq("Correo", email_clean).execute()
-            if busqueda.data and len(busqueda.data) > 0:
-                contacto_id = busqueda.data[0]["id"]
+    exito_bd = False
 
-        if contacto_id:
-            # ACTUALIZAR
-            supabase.table("Contactos").update(payload).eq("id", contacto_id).execute()
-            #st.success(f"¡Contacto actualizado correctamente en estado '{estado_final}'!") # Comentado para no saturar la UI
-        else:
-            # INSERTAR
-            supabase.table("Contactos").insert(payload).execute()
-            #st.success(f"¡Contacto creado correctamente en estado '{estado_final}'!") # Comentado para no saturar la UI
+    for _ in range(25):
+        try:
+            res = None
             
-    except Exception as err:
-        st.error(f"Error al procesar en Supabase: {err}")
+            # 1. Intentar actualizar buscando por el Correo Original
+            if correo_original and not exito_bd:
+                for col_c in ["Correo", "email", "Email", "correo"]:
+                    try:
+                        res = supabase.table("Contactos").update(payload).eq(col_c, correo_original).execute()
+                        if res and hasattr(res, 'data') and res.data:
+                            exito_bd = True
+                            break
+                    except Exception:
+                        pass
+            
+            # 2. Intentar actualizar buscando por Nombre y Empresa originales
+            if nombre_original and empresa_original and not exito_bd:
+                for col_n, col_e in [("Nombre", "Empresa"), ("nombre", "empresa")]:
+                    try:
+                        res = supabase.table("Contactos").update(payload).eq(col_n, nombre_original).eq(col_e, empresa_original).execute()
+                        if res and hasattr(res, 'data') and res.data:
+                            exito_bd = True
+                            break
+                    except Exception:
+                        pass
 
-    # 6. Forzar actualización inmediata del CRM
+            # 3. Si no encontró los originales o es contacto nuevo, inserta o actualiza por el email actual
+            if not exito_bd:
+                existe = False
+                for col_c in ["Correo", "email", "Email", "correo"]:
+                    try:
+                        busq = supabase.table("Contactos").select("*").eq(col_c, email_clean).execute()
+                        if busq and hasattr(busq, 'data') and busq.data:
+                            supabase.table("Contactos").update(payload).eq(col_c, email_clean).execute()
+                            exito_bd = True
+                            existe = True
+                            break
+                    except Exception:
+                        continue
+                        
+                if not existe:
+                    supabase.table("Contactos").insert(payload).execute()
+                    exito_bd = True
+
+            break 
+            
+        except Exception as err:
+            err_msg = str(err)
+            match = re.search(r"Could not find the '([^']+)' column", err_msg)
+            if match:
+                col_err = match.group(1)
+                if col_err in payload:
+                    payload.pop(col_err, None)
+                    continue
+            
+            st.error(f"Error crítico en BD: {err}")
+            time.sleep(2)
+            break
+
     st.cache_data.clear()
         
 def eliminar_contacto(correo):
@@ -255,7 +290,6 @@ def eliminar_contacto(correo):
     try:
         if not correo:
             return
-        # Borramos buscando coincidencia exacta en las columnas de correo
         for col in ["Email", "email", "Correo", "correo"]:
             try:
                 supabase.table("Contactos").delete().eq(col, str(correo).strip().lower()).execute()
@@ -497,14 +531,6 @@ def eliminar_cotizacion(folio_cot):
         st.cache_data.clear()
     except Exception as e:
         st.error(f"Error al eliminar cotización de Supabase: {e}")
-
-def obtener_consejo_ia(notas_bitacora):
-    return (
-        "💡 **Consejo de IA (Entorno Local / VS Code):**\n"
-        f"1. Analiza las notas recientes sobre '{notas_bitacora}' para identificar necesidades pendientes.\n"
-        "2. Propón una reunión de seguimiento enfocada en resolver dudas técnicas o comerciales.\n"
-        "3. Envía un correo con un resumen de valor antes de la próxima llamada."
-    )
 
 def calcular_semaforo_avanzado(row):
     hoy = pd.Timestamp(datetime.now().date())
@@ -2049,6 +2075,7 @@ if check_password():
                                 row_match_cont = df_contactos[df_contactos['Nombre'].astype(str).str.strip() == nombre_cont_ext]
                                 if not row_match_cont.empty:
                                     r_c_fact = row_match_cont.iloc[0]
+                                    c_id = str(r_c_fact.get('id', r_c_fact.get('ID', r_c_fact.get('Id'))))
                                     guardar_contacto(
                                         nombre=str(r_c_fact.get('Nombre', '')),
                                         email=str(r_c_fact.get('Correo', r_c_fact.get('email', ''))),
@@ -2059,7 +2086,7 @@ if check_password():
                                         valor=int(n_monto),
                                         rol=str(r_c_fact.get('Rol_Contacto', 'Finanzas / Compras')),
                                         bitacora=str(r_c_fact.get('Bitacora', '')),
-                                        contacto_id=r_c_fact.get('id')
+                                        contacto_id=c_id
                                     )
                                 else:
                                     guardar_contacto(
@@ -2437,30 +2464,31 @@ if check_password():
                 st.subheader(estados[i])
                 contactos_estado = df_contactos[df_contactos["Estado"] == estados[i]]
                 for idx, row in contactos_estado.iterrows():
+                    
+                    # Extraer datos originales para encontrarlo seguro en la Base de Datos
+                    nombre_original = str(row.get('Nombre', ''))
+                    empresa_original = str(row.get('Empresa', ''))
+                    correo_bruto = row.get('Correo', row.get('email', ''))
+                    
+                    val_correo = correo_bruto.iloc[0] if hasattr(correo_bruto, "iloc") else correo_bruto
+                    if isinstance(val_correo, (list, tuple)):
+                        val_correo = val_correo[0] if len(val_correo) > 0 else ""
+                    val_correo_str = str(val_correo).strip()
+                    
+                    unique_k = f"card_{idx}_{nombre_original.replace(' ', '')}"
                     monto_val_row = f"${int(row.get('Valor', 0)):,.0f}".replace(",", ".")
-                    st.write(f"👤 **{row.get('Nombre', 'Sin Nombre')}**")
-                    st.write(f"🏢 Empresa: {row.get('Empresa', 'N/A')}")
+                    
+                    st.write(f"👤 **{nombre_original if nombre_original else 'Sin Nombre'}**")
+                    st.write(f"🏢 Empresa: {empresa_original if empresa_original else 'N/A'}")
                     if row.get('Planta'):
                         st.write(f"🏭 Planta: {row.get('Planta')}")
                     st.write(f"💼 Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
                     st.write(f"💰 Valor: {monto_val_row}")
                     
-                    correo_contacto = row.get('Correo', row.get('email', ''))
-                    nombre_contacto = row.get('Nombre', 'Cliente')
-                    
-                    val_correo = correo_contacto.iloc[0] if hasattr(correo_contacto, "iloc") else correo_contacto
-                    if isinstance(val_correo, (list, tuple)):
-                        val_correo = val_correo[0] if len(val_correo) > 0 else ""
-                    val_correo_str = str(val_correo).strip()
-
                     if pd.notna(val_correo) and val_correo_str != "" and "@" in val_correo_str and not val_correo_str.endswith(".local"):
-                        asunto = f"Seguimiento de Propuesta / Proyecto - Itelcam"
-                        cuerpo = f"Hola {nombre_contacto},\n\nEspero que te encuentres muy bien."
-
                         import urllib.parse
-                        asunto_enc = urllib.parse.quote(asunto)
-                        cuerpo_enc = urllib.parse.quote(cuerpo)
-                        
+                        asunto_enc = urllib.parse.quote("Seguimiento de Propuesta / Proyecto - Itelcam")
+                        cuerpo_enc = urllib.parse.quote(f"Hola {nombre_original},\n\nEspero que te encuentres muy bien.")
                         mailto_link = f"mailto:{val_correo_str}?subject={asunto_enc}&body={cuerpo_enc}"
                         
                         st.markdown(
@@ -2468,16 +2496,15 @@ if check_password():
                             <a href="{mailto_link}" target="_blank" style="display:inline-block; padding:6px 12px; margin:4px 0px; font-size:12px; color:white; background-color:#2563eb; text-align:center; text-decoration:none; border-radius:4px; font-weight:600;">
                                 ✉ Enviar Correo
                             </a>
-                            """,
-                            unsafe_allow_html=True
+                            """, unsafe_allow_html=True
                         )
                     else:
                         st.caption("⚠ Sin correo registrado")
 
-                    with st.expander(f"✏️ Editar Tarjeta ({row.get('Nombre', 'Contacto')})"):
-                        with st.form(f"form_quick_edit_card_{idx}"):
-                            qe_nombre = st.text_input("Nombre", value=str(row.get('Nombre', '')))
-                            qe_empresa = st.text_input("Empresa", value=str(row.get('Empresa', '')))
+                    with st.expander(f"✏️ Editar Tarjeta"):
+                        with st.form(f"form_quick_edit_card_{unique_k}"):
+                            qe_nombre = st.text_input("Nombre", value=nombre_original)
+                            qe_empresa = st.text_input("Empresa", value=empresa_original)
                             qe_planta = st.text_input("Planta", value=str(row.get('Planta', '')))
                             qe_correo = st.text_input("Correo", value=str(val_correo_str) if not val_correo_str.endswith(".local") else "")
                             qe_celular = st.text_input("Celular", value=str(row.get('Celular', '')))
@@ -2494,110 +2521,61 @@ if check_password():
                             
                             if st.form_submit_button("💾 Guardar Cambios"):
                                 guardar_contacto(
-                                    nombre=qe_nombre,
-                                    email=qe_correo,
-                                    estado=qe_estado,
-                                    telefono=qe_celular,
-                                    empresa=qe_empresa,
-                                    planta=qe_planta,
-                                    valor=qe_valor,
-                                    rol=qe_rol,
-                                    bitacora=str(row.get('Bitacora', '')),
-                                    contacto_id=row.get('id')
+                                    nombre=qe_nombre, email=qe_correo, estado=qe_estado,
+                                    telefono=qe_celular, empresa=qe_empresa, planta=qe_planta,
+                                    valor=qe_valor, rol=qe_rol, bitacora=str(row.get('Bitacora', '')),
+                                    correo_original=val_correo_str, nombre_original=nombre_original, empresa_original=empresa_original
                                 )
                                 st.success("¡Tarjeta actualizada en la nube!")
                                 st.rerun()
 
-                    nota_actual = row.get('Bitacora', '')
-                    if pd.isna(nota_actual):
-                        nota_actual = ""
+                    nota_actual = str(row.get('Bitacora', '')) if pd.notna(row.get('Bitacora')) else ""
                         
-                    with st.expander(f"📝 Bitácora ({row.get('Nombre', 'Contacto')})"):
-                        nueva_nota = st.text_area(
-                            "Resumen de llamada/reunión:",
-                            value=nota_actual,
-                            key=f"bitacora_txt_{idx}"
-                        )
+                    with st.expander(f"📝 Bitácora"):
+                        nueva_nota = st.text_area("Resumen de llamada/reunión:", value=nota_actual, key=f"bitacora_txt_{unique_k}")
 
-                        with st.form(f"form_interaccion_{idx}"):
-                            st.write("Registrar Evento en Línea de Tiempo")
-                            tipo_inter = st.selectbox("Tipo de Interacción", ["Llamada Telefónica", "Reunión", "Correo Electrónico", "WhatsApp"], key=f"tipo_int_{idx}")
-                            detalle_inter = st.text_input("Breve detalle del avance", key=f"det_int_{idx}")
+                        with st.form(f"form_interaccion_{unique_k}"):
+                            tipo_inter = st.selectbox("Tipo de Interacción", ["Llamada Telefónica", "Reunión", "Correo Electrónico", "WhatsApp"], key=f"tipo_int_{unique_k}")
+                            detalle_inter = st.text_input("Breve detalle del avance", key=f"det_int_{unique_k}")
                             
-                            if st.form_submit_button("➕ Añadir a Línea de Tiempo"):
-                                if detalle_inter.strip() != "":
-                                    guardar_interaccion(
-                                        nombre_contacto=row['Nombre'],
-                                        empresa=row['Empresa'],
-                                        tipo=tipo_inter,
-                                        detalle=detalle_inter
-                                    )
-                                    st.success("¡Interacción registrada en la nube!")
-                                    st.rerun()
-                                else:
-                                    st.warning("Escribe un detalle para la interacción.")
+                            if st.form_submit_button("➕ Añadir a Línea de Tiempo") and detalle_inter.strip() != "":
+                                guardar_interaccion(nombre_contacto=nombre_original, empresa=empresa_original, tipo=tipo_inter, detalle=detalle_inter)
+                                st.success("¡Interacción registrada!")
+                                st.rerun()
                         
-                        if nueva_nota.strip() != "":
-                            nota_lower = nueva_nota.lower()
-                            if any(w in nota_lower for w in ["excelente", "genial", "interesado", "positivo", "listo", "pagarán", "agendar"]):
-                                st.success("😊 Sentimiento detectado en nota: **Positivo / Oportunidad Alta**")
-                            elif any(w in nota_lower for w in ["problema", "caro", "retraso", "molesto", "duda", "cancelar", "esperar"]):
-                                st.warning("⚠️ Sentimiento detectado en nota: **Riesgo / Requiere Atención**")
-                            else:
-                                st.info("ℹ️ Sentimiento detectado en nota: **Neutral**")
-
                         col_b1, col_b2 = st.columns(2)
                         with col_b1:
-                            if st.button("💾 Guardar", key=f"btn_bitacora_{idx}"):
+                            if st.button("💾 Guardar Nota", key=f"btn_bitacora_{unique_k}"):
                                 guardar_contacto(
-                                    nombre=row['Nombre'],
-                                    email=val_correo_str,
-                                    estado=row['Estado'],
-                                    telefono=row.get('Celular', ''),
-                                    empresa=row.get('Empresa', ''),
-                                    planta=row.get('Planta', ''),
-                                    valor=row.get('Valor', 0),
-                                    rol=row.get('Rol_Contacto', 'Influenciador'),
-                                    bitacora=nueva_nota,
-                                    contacto_id=row.get('id')
+                                    nombre=nombre_original, email=val_correo_str, estado=row['Estado'],
+                                    telefono=row.get('Celular', ''), empresa=empresa_original, planta=row.get('Planta', ''),
+                                    valor=row.get('Valor', 0), rol=row.get('Rol_Contacto', 'Influenciador'), bitacora=nueva_nota,
+                                    correo_original=val_correo_str, nombre_original=nombre_original, empresa_original=empresa_original
                                 )
-                                guardar_interaccion(
-                                    nombre_contacto=row['Nombre'],
-                                    empresa=row['Empresa'],
-                                    tipo="Nota / Bitácora",
-                                    detalle=nueva_nota[:80] + "..."
-                                )
-                                st.success("¡Bitácora sincronizada en Supabase!")
                                 st.rerun()
                         with col_b2:
-                            nuevo_estado_rapido = st.selectbox("Mover:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{idx}")
+                            nuevo_estado_rapido = st.selectbox("Mover a:", estados, index=estados.index(row['Estado']) if row['Estado'] in estados else 0, key=f"mov_{unique_k}")
                             if nuevo_estado_rapido != row['Estado']:
                                 guardar_contacto(
-                                    nombre=row['Nombre'],
-                                    email=val_correo_str,
-                                    estado=nuevo_estado_rapido,
-                                    telefono=row.get('Celular', ''),
-                                    empresa=row.get('Empresa', ''),
-                                    planta=row.get('Planta', ''),
-                                    valor=row.get('Valor', 0),
-                                    rol=row.get('Rol_Contacto', 'Influenciador'),
-                                    bitacora=nota_actual,
-                                    contacto_id=row.get('id')
+                                    nombre=nombre_original, email=val_correo_str, estado=nuevo_estado_rapido,
+                                    telefono=row.get('Celular', ''), empresa=empresa_original, planta=row.get('Planta', ''),
+                                    valor=row.get('Valor', 0), rol=row.get('Rol_Contacto', 'Influenciador'), bitacora=nota_actual,
+                                    correo_original=val_correo_str, nombre_original=nombre_original, empresa_original=empresa_original
                                 )
                                 st.rerun()
 
-                    with st.expander(f"⏱ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
-                        filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == row.get('Nombre')]
+                    with st.expander(f"⏱ Línea de Tiempo"):
+                        filtro_inter = df_interacciones[df_interacciones['Nombre_Contacto'] == nombre_original]
                         if not filtro_inter.empty:
                             for _, inter_row in filtro_inter.iterrows():
                                 st.caption(f"[{inter_row['Fecha']}] **{inter_row['Tipo']}**: {inter_row['Detalle']}")
                         else:
-                            st.caption("No hay interacciones registradas aún.")
+                            st.caption("Sin interacciones aún.")
 
-                    if st.button("🗑️ Borrar", key=f"del_{idx}"):
+                    if st.button("🗑️ Borrar Contacto", key=f"del_{unique_k}"):
+                        from __main__ import eliminar_contacto
                         eliminar_contacto(val_correo_str)
                         st.rerun()
-
         st.divider()
 
         st.subheader("🎯 Calificación de Prospectos (Lead Scoring)")
@@ -2816,13 +2794,15 @@ if check_password():
 
         with st.expander("✏ Editar contactos existentes"):
             for idx, row in df_contactos.iterrows():
-                # Función auxiliar para asegurar que obtengamos un valor escalar y no una Serie
                 def _get_scalar(val, default=""):
                     if isinstance(val, pd.Series):
                         val = val.iloc[0] if not val.empty else default
                     if pd.isna(val):
                         return default
                     return val
+
+                c_id_bot = str(_get_scalar(row.get('id', row.get('ID', row.get('Id', idx))), idx))
+                unique_k_bot = f"{c_id_bot}_bot"
 
                 nombre_val = str(_get_scalar(row.get('Nombre', row.get('nombre', '')), ''))
                 empresa_val = str(_get_scalar(row.get('Empresa', row.get('empresa', '')), ''))
@@ -2840,22 +2820,22 @@ if check_password():
                     
                 bitacora_val = str(_get_scalar(row.get('Bitacora', row.get('bitacora', '')), ''))
 
-                with st.form(f"edit_{idx}"):
+                with st.form(f"edit_{unique_k_bot}"):
                     st.write(f"Editando: {nombre_val if nombre_val else empresa_val}")
-                    n_nombre = st.text_input("Nombre", nombre_val, key=f"ed_nom_{idx}")
-                    n_empresa = st.text_input("Empresa", empresa_val, key=f"ed_emp_{idx}")
-                    n_planta = st.text_input("Planta", planta_val, key=f"ed_plan_{idx}")
-                    n_correo = st.text_input("Correo", correo_val, key=f"ed_corr_{idx}")
-                    n_celular = st.text_input("Celular", celular_val, key=f"ed_cel_{idx}")
+                    n_nombre = st.text_input("Nombre", nombre_val, key=f"ed_nom_{unique_k_bot}")
+                    n_empresa = st.text_input("Empresa", empresa_val, key=f"ed_emp_{unique_k_bot}")
+                    n_planta = st.text_input("Planta", planta_val, key=f"ed_plan_{unique_k_bot}")
+                    n_correo = st.text_input("Correo", correo_val, key=f"ed_corr_{unique_k_bot}")
+                    n_celular = st.text_input("Celular", celular_val, key=f"ed_cel_{unique_k_bot}")
                     
-                    n_estado = st.selectbox("Estado", estados, index=estados.index(estado_val) if estado_val in estados else 0, key=f"ed_est_{idx}")
+                    n_estado = st.selectbox("Estado", estados, index=estados.index(estado_val) if estado_val in estados else 0, key=f"ed_est_{unique_k_bot}")
                     
                     roles_opts = ["Tomador de Decisiones (CEO/Gerente)", "Influenciador", "Técnico / Operativo", "Finanzas / Compras"]
                     idx_rol = roles_opts.index(rol_val) if rol_val in roles_opts else 1
-                    n_rol = st.selectbox("Rol en la Cuenta", roles_opts, index=idx_rol, key=f"ed_rol_{idx}")
+                    n_rol = st.selectbox("Rol en la Cuenta", roles_opts, index=idx_rol, key=f"ed_rol_{unique_k_bot}")
                     
-                    n_valor = st.number_input("Valor", value=valor_val, min_value=0, step=1000, key=f"ed_val_{idx}")
-                    n_bitacora = st.text_area("Bitácora / Notas", value=bitacora_val, key=f"ed_bit_{idx}")
+                    n_valor = st.number_input("Valor", value=valor_val, min_value=0, step=1000, key=f"ed_val_{unique_k_bot}")
+                    n_bitacora = st.text_area("Bitácora / Notas", value=bitacora_val, key=f"ed_bit_{unique_k_bot}")
                     
                     if st.form_submit_button("💾 Guardar Cambios"):
                         guardar_contacto(
@@ -2868,7 +2848,7 @@ if check_password():
                             valor=n_valor,
                             rol=n_rol,
                             bitacora=n_bitacora,
-                            contacto_id=_get_scalar(row.get('id'))
+                            contacto_id=c_id_bot
                         )
                         st.success("¡Contacto actualizado con éxito en Supabase!")
                         st.rerun()
