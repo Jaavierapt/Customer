@@ -2605,7 +2605,7 @@ if check_password():
 
         st.subheader("🎯 Calificación de Prospectos (Lead Scoring)")
 
-      def calcular_lead_scoring(row):
+def calcular_lead_scoring(row):
     """Calcula el lead score y la temperatura de forma segura manejando tipos de datos nulos o textos."""
     try:
         val_raw = row.get('Valor', 0) if isinstance(row, dict) else row['Valor'] if 'Valor' in row else 0
@@ -2631,8 +2631,7 @@ if check_password():
 
         return pd.Series([score, temperatura])
     except Exception:
-        return pd.Series([0, "Frío"]) 
-    
+        return pd.Series([0, "Frío"])
 
         if not df_contactos.empty:
             df_contactos[['Lead_Score', 'Temperatura_Lead']] = df_contactos.apply(calcular_lead_scoring, axis=1)
