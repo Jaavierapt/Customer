@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Guarda o actualiza un contacto de forma segura utilizando .upsert() directo en Supabase."""
+    """Guarda o actualiza un contacto verificando existencia previa para evitar errores de restricciones en Supabase."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -223,12 +223,29 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     }
 
     temp_payload = payload.copy()
-    
+
+    # Paso 1: Verificar si el contacto ya existe en la base de datos
+    existente = None
+    try:
+        res = supabase.table("Contactos").select("*").or_(f"email.eq.{email_clean},Correo.eq.{email_clean},Email.eq.{email_clean},correo.eq.{email_clean}").execute()
+        if res.data and len(res.data) > 0:
+            existente = res.data[0]
+    except Exception:
+        pass
+
+    # Paso 2: Intentar insertar o actualizar limpiando columnas faltantes si es necesario
     for _ in range(15):
         try:
-            # Usamos upsert directamente utilizando el correo como conflicto para garantizar que guarde o actualice sin errores
-            supabase.table("Contactos").upsert(temp_payload, on_conflict="email").execute()
-            st.success("¡Contacto guardado/actualizado con éxito en Supabase!")
+            if existente:
+                reg_id = existente.get("id") or existente.get("ID")
+                if reg_id:
+                    supabase.table("Contactos").update(temp_payload).eq("id", reg_id).execute()
+                else:
+                    supabase.table("Contactos").update(temp_payload).eq("email", email_clean).execute()
+            else:
+                supabase.table("Contactos").insert(temp_payload).execute()
+            
+            st.success("¡Contacto guardado con éxito en Supabase!")
             break
         except Exception as err:
             err_str = str(err)
@@ -239,13 +256,7 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
                 for k in keys_to_remove:
                     temp_payload.pop(k, None)
                 continue
-            # Intentar alternativa con 'Correo' si falla 'email'
-            try:
-                supabase.table("Contactos").upsert(temp_payload, on_conflict="Correo").execute()
-                st.success("¡Contacto guardado/actualizado con éxito en Supabase!")
-                break
-            except Exception as err2:
-                raise err2
+            raise err
 
     st.cache_data.clear()
     st.rerun()
