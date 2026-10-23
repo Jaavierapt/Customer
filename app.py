@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Guarda o actualiza un contacto de forma segura verificando su existencia previa en Supabase."""
+    """Guarda o actualiza un contacto de forma segura utilizando .upsert() directo en Supabase."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -222,34 +222,33 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         "Planta": str(planta).strip().upper(), "planta": str(planta).strip().upper()
     }
 
-    try:
-        existing = supabase.table("Contactos").select("*").or_(f"email.eq.{email_clean},Correo.eq.{email_clean}").execute()
-        temp_payload = payload.copy()
-        
-        for _ in range(15):
+    temp_payload = payload.copy()
+    
+    for _ in range(15):
+        try:
+            # Usamos upsert directamente utilizando el correo como conflicto para garantizar que guarde o actualice sin errores
+            supabase.table("Contactos").upsert(temp_payload, on_conflict="email").execute()
+            st.success("¡Contacto guardado/actualizado con éxito en Supabase!")
+            break
+        except Exception as err:
+            err_str = str(err)
+            match = re.search(r"Could not find the '([^']+)' column", err_str)
+            if match:
+                col_err = match.group(1)
+                keys_to_remove = [k for k in temp_payload.keys() if k.lower() == col_err.lower()]
+                for k in keys_to_remove:
+                    temp_payload.pop(k, None)
+                continue
+            # Intentar alternativa con 'Correo' si falla 'email'
             try:
-                if existing.data and len(existing.data) > 0:
-                    supabase.table("Contactos").update(temp_payload).or_(f"email.eq.{email_clean},Correo.eq.{email_clean}").execute()
-                    st.success("¡Contacto actualizado correctamente en Supabase!")
-                else:
-                    supabase.table("Contactos").insert(temp_payload).execute()
-                    st.success("¡Contacto guardado con éxito!")
+                supabase.table("Contactos").upsert(temp_payload, on_conflict="Correo").execute()
+                st.success("¡Contacto guardado/actualizado con éxito en Supabase!")
                 break
-            except Exception as err:
-                err_str = str(err)
-                match = re.search(r"Could not find the '([^']+)' column", err_str)
-                if match:
-                    col_err = match.group(1)
-                    keys_to_remove = [k for k in temp_payload.keys() if k.lower() == col_err.lower()]
-                    for k in keys_to_remove:
-                        temp_payload.pop(k, None)
-                    continue
-                raise err
+            except Exception as err2:
+                raise err2
 
-        st.cache_data.clear()
-        st.rerun() # <-- Esto recarga la app inmediatamente para mostrar el contacto nuevo
-    except Exception as e:
-        st.error(f"Detalle técnico de Supabase al guardar contacto: {e}")
+    st.cache_data.clear()
+    st.rerun()
         
 def eliminar_contacto(correo):
     """Elimina un contacto específico de la tabla Contactos en Supabase según su correo exacto."""
