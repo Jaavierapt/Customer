@@ -2604,11 +2604,10 @@ if check_password():
         st.divider()
 
         st.subheader("🎯 Calificación de Prospectos (Lead Scoring)")
-       
-    def calcular_lead_scoring(row):
-        """Calcula el lead score y la temperatura de forma segura manejando tipos de datos nulos o textos."""
+
+      def calcular_lead_scoring(row):
+    """Calcula el lead score y la temperatura de forma segura manejando tipos de datos nulos o textos."""
     try:
-        # Extraemos el valor y nos aseguramos de que sea un número válido
         val_raw = row.get('Valor', 0) if isinstance(row, dict) else row['Valor'] if 'Valor' in row else 0
         try:
             valor = float(val_raw) if pd.notna(val_raw) and str(val_raw).strip() != '' else 0.0
@@ -2616,7 +2615,6 @@ if check_password():
             valor = 0.0
 
         score = 0
-        # Evaluamos con seguridad
         if valor >= 3000000:
             score += 40
         elif valor >= 1000000:
@@ -2624,9 +2622,6 @@ if check_password():
         else:
             score += 10
 
-        # Puedes mantener el resto de tu lógica de scoring aquí según lo tengas configurado...
-        
-        # Determinamos la temperatura según el score acumulado
         if score >= 70:
             temperatura = "Caliente"
         elif score >= 40:
@@ -2636,7 +2631,8 @@ if check_password():
 
         return pd.Series([score, temperatura])
     except Exception:
-        return pd.Series([0, "Frío"])
+        return pd.Series([0, "Frío"]) 
+    
 
         if not df_contactos.empty:
             df_contactos[['Lead_Score', 'Temperatura_Lead']] = df_contactos.apply(calcular_lead_scoring, axis=1)
