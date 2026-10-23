@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Inserta o actualiza un contacto en Supabase de forma segura descartando campos no soportados e incluyendo bitácora."""
+    """Inserta o actualiza un contacto en Supabase de forma segura usando un identificador único por nombre y empresa."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -200,11 +200,14 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not nom_final:
         nom_final = "Contacto Sin Nombre"
 
+    emp_final = str(empresa).strip().upper() if empresa else "SIN EMPRESA"
+    
+    # Generamos un identificador único interno para evitar que se pisen registros sin correo
+    slug_id = f"{nom_final.lower().replace(' ', '_')}_{emp_final.lower().replace(' ', '_')}"
+
     email_clean = str(email).strip().lower()
     if not email_clean or "@" not in email_clean:
-        slug_nom = nom_final.lower().replace(" ", ".") if nom_final else "contacto"
-        slug_emp = str(empresa).strip().lower().replace(" ", "") if empresa else "itelcam"
-        email_clean = f"{slug_nom}@{slug_emp}.local"
+        email_clean = f"{slug_id}@itelcam.local"
 
     payload = {
         "Nombre": nom_final, "nombre": nom_final,
@@ -216,26 +219,21 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         "Valor": int(valor) if valor else 0, "valor": int(valor) if valor else 0,
         "Rol": str(rol).strip() if rol else "Influenciador", "rol": str(rol).strip() if rol else "Influenciador",
         "Rol_Contacto": str(rol).strip() if rol else "Influenciador", "rol_contacto": str(rol).strip() if rol else "Influenciador",
-        "Bitacora": str(bitacora).strip(), "bitacora": str(bitacora).strip()
+        "Bitacora": str(bitacora).strip(), "bitacora": str(bitacora).strip(),
+        "Empresa": emp_final, "empresa": emp_final,
+        "Planta": str(planta).strip().upper(), "planta": str(planta).strip().upper()
     }
-
-    if empresa:
-        payload["Empresa"] = str(empresa).strip().upper()
-        payload["empresa"] = str(empresa).strip().upper()
-    if planta:
-        payload["Planta"] = str(planta).strip().upper()
-        payload["planta"] = str(planta).strip().upper()
 
     exito = False
     ultimo_error = "Error desconocido de conexión o esquema."
+    
+    # Intentamos hacer upsert priorizando el correo real o el identificador único
     conflict_cols = ["email", "Email", "correo", "Correo"]
     
     for conflict in conflict_cols:
         temp_payload = payload.copy()
-        for _ in range(30):
+        for _ in range(5):
             try:
-                if conflict not in temp_payload:
-                    break
                 supabase.table("Contactos").upsert(temp_payload, on_conflict=conflict).execute()
                 st.cache_data.clear()
                 exito = True
@@ -252,36 +250,21 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
             break
 
     if not exito:
-        temp_payload = payload.copy()
-        for _ in range(30):
-            try:
-                supabase.table("Contactos").insert(temp_payload).execute()
-                st.cache_data.clear()
-                exito = True
-                break
-            except Exception as err:
-                ultimo_error = str(err)
-                match = re.search(r"Could not find the '([^']+)' column", ultimo_error)
-                if match:
-                    col_err = match.group(1)
-                    temp_payload.pop(col_err, None)
-                    continue
-                break
-
-    if not exito:
-        st.error(f"Detalle técnico de Supabase: {ultimo_error}")
+        st.error(f"Detalle técnico de Supabase al guardar contacto: {ultimo_error}")
         
 def eliminar_contacto(correo):
-    """Elimina un contacto de la tabla Contactos en Supabase según su correo."""
+    """Elimina un contacto específico de la tabla Contactos en Supabase según su correo exacto."""
     try:
         if not correo:
             return
+        # Borramos buscando coincidencia exacta en las columnas de correo
         for col in ["Email", "email", "Correo", "correo"]:
             try:
                 supabase.table("Contactos").delete().eq(col, str(correo).strip().lower()).execute()
             except Exception:
                 pass
         st.cache_data.clear()
+        st.success("Contacto eliminado correctamente sin afectar a otros registros.")
     except Exception as e:
         st.error(f"Error al eliminar el contacto: {e}")
 
