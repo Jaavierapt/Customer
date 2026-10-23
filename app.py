@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Guarda un contacto utilizando los nombres exactos de las columnas de la tabla Contactos en Supabase."""
+    """Guarda un contacto en Supabase de forma segura."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -207,7 +207,6 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not email_clean or "@" not in email_clean:
         email_clean = f"{slug_id}@itelcam.local"
 
-    # Mapeo exacto según las columnas visibles en tu Supabase
     payload = {
         "Nombre": nom_final,
         "Correo": email_clean,
@@ -222,8 +221,9 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     }
 
     try:
-        supabase.table("Contactos").insert(payload).execute()
-        st.success("¡Contacto guardado con éxito en Supabase!")
+        # Insertar directamente en Supabase
+        response = supabase.table("Contactos").insert(payload).execute()
+        st.success("¡Contacto guardado con éxito en Supabase y en el CRM!")
     except Exception as err:
         st.error(f"Error al guardar en Supabase: {err}")
 
