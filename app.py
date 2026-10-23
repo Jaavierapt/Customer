@@ -186,7 +186,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora=""):
-    """Guarda o actualiza un contacto verificando existencia previa para evitar errores de restricciones en Supabase."""
+    """Guarda un contacto utilizando los nombres exactos de las columnas de la tabla Contactos en Supabase."""
     try:
         df_fact = cargar_datos()
         if not df_fact.empty and 'Empresa' in df_fact.columns:
@@ -207,56 +207,25 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     if not email_clean or "@" not in email_clean:
         email_clean = f"{slug_id}@itelcam.local"
 
+    # Mapeo exacto según las columnas visibles en tu Supabase
     payload = {
-        "Nombre": nom_final, "nombre": nom_final,
-        "Email": email_clean, "email": email_clean,
-        "Correo": email_clean, "correo": email_clean,
-        "Estado": str(estado).strip() if estado else "Propuesta", "estado": str(estado).strip() if estado else "Propuesta",
-        "Telefono": str(telefono).strip(), "telefono": str(telefono).strip(),
-        "Celular": str(telefono).strip(), "celular": str(telefono).strip(),
-        "Valor": int(valor) if valor else 0, "valor": int(valor) if valor else 0,
-        "Rol": str(rol).strip() if rol else "Influenciador", "rol": str(rol).strip() if rol else "Influenciador",
-        "Rol en la Cuenta": str(rol).strip() if rol else "Influenciador", "rol_en_la_cuenta": str(rol).strip() if rol else "Influenciador",
-        "bitacora": str(bitacora).strip(), "Bitacora": str(bitacora).strip(),
-        "Empresa": emp_final, "empresa": emp_final,
-        "Planta": str(planta).strip().upper(), "planta": str(planta).strip().upper()
+        "Nombre": nom_final,
+        "Correo": email_clean,
+        "email": email_clean,
+        "Estado": str(estado).strip() if estado else "Propuesta",
+        "Celular": str(telefono).strip(),
+        "Valor": int(valor) if valor else 0,
+        "Rol en la Cuenta": str(rol).strip() if rol else "Influenciador",
+        "bitacora": str(bitacora).strip(),
+        "Empresa": emp_final,
+        "Planta": str(planta).strip().upper()
     }
 
-    temp_payload = payload.copy()
-
-    # Paso 1: Verificar si el contacto ya existe en la base de datos
-    existente = None
     try:
-        res = supabase.table("Contactos").select("*").or_(f"email.eq.{email_clean},Correo.eq.{email_clean},Email.eq.{email_clean},correo.eq.{email_clean}").execute()
-        if res.data and len(res.data) > 0:
-            existente = res.data[0]
-    except Exception:
-        pass
-
-    # Paso 2: Intentar insertar o actualizar limpiando columnas faltantes si es necesario
-    for _ in range(15):
-        try:
-            if existente:
-                reg_id = existente.get("id") or existente.get("ID")
-                if reg_id:
-                    supabase.table("Contactos").update(temp_payload).eq("id", reg_id).execute()
-                else:
-                    supabase.table("Contactos").update(temp_payload).eq("email", email_clean).execute()
-            else:
-                supabase.table("Contactos").insert(temp_payload).execute()
-            
-            st.success("¡Contacto guardado con éxito en Supabase!")
-            break
-        except Exception as err:
-            err_str = str(err)
-            match = re.search(r"Could not find the '([^']+)' column", err_str)
-            if match:
-                col_err = match.group(1)
-                keys_to_remove = [k for k in temp_payload.keys() if k.lower() == col_err.lower()]
-                for k in keys_to_remove:
-                    temp_payload.pop(k, None)
-                continue
-            raise err
+        supabase.table("Contactos").insert(payload).execute()
+        st.success("¡Contacto guardado con éxito en Supabase!")
+    except Exception as err:
+        st.error(f"Error al guardar en Supabase: {err}")
 
     st.cache_data.clear()
     st.rerun()
