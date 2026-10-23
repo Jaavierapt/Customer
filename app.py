@@ -175,7 +175,8 @@ def cargar_contactos():
                 if not df_facturas_exist.empty and 'Empresa' in df_facturas_exist.columns and not df_c.empty:
                     empresas_con_factura = set(df_facturas_exist['Empresa'].dropna().astype(str).str.strip().str.upper().unique())
                     mask_facturado = df_c['Empresa'].astype(str).str.strip().str.upper().isin(empresas_con_factura)
-                    df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
+                    # Comentado para evitar que sobrescriba el estado visualmente en la tabla a 'Ganado' cuando no se desea
+                    # df_c.loc[mask_facturado, 'Estado'] = 'Ganado'
             except Exception:
                 pass
 
@@ -186,7 +187,7 @@ def cargar_contactos():
     return pd.DataFrame(columns=["Nombre", "Empresa", "Planta", "Correo", "Celular", "Estado", "Valor", "Rol_Contacto", "Bitacora"])
 
 def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa="", planta="", valor=0, rol="Influenciador", bitacora="", contacto_id=None):
-    """Guarda o actualiza un contacto respetando su estado, calculando calificación y evitando duplicados."""
+    """Guarda o actualiza un contacto respetando estrictamente su estado, calculando calificación y evitando duplicados."""
     
     # 1. Limpieza y formateo de datos
     nom_final = str(nombre).strip() if nombre else str(empresa).strip().upper()
@@ -201,17 +202,18 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
         email_clean = f"{slug_id}@itelcam.local"
 
     val = int(valor) if valor else 0
-    # ¡CORRECCIÓN!: Se respeta estrictamente el estado seleccionado por el usuario
+    
+    # 2. Respetar estrictamente el estado seleccionado
     estado_final = str(estado).strip() if estado else "Propuesta"
 
-    # ¡CORRECCIÓN!: Cálculo de Calificación para que no quede vacío
+    # 3. Cálculo automático de Calificación
     calificacion = "Baja"
     if val >= 2000000 or estado_final in ["Ganado", "Propuesta"]:
         calificacion = "Alta"
     elif val >= 800000 or estado_final == "Contacto":
         calificacion = "Media"
 
-    # Mapeo exacto para Supabase
+    # 4. Mapeo exacto de columnas para Supabase
     payload = {
         "Nombre": nom_final,
         "Correo": email_clean,
@@ -227,28 +229,26 @@ def guardar_contacto(nombre, email="", estado="Propuesta", telefono="", empresa=
     }
 
     try:
-        # ¡CORRECCIÓN!: Lógica anti-duplicados
-        # Si no se pasó un ID desde Streamlit, buscamos si el correo ya existe en la base de datos
+        # 5. Lógica estricta anti-duplicados
         if not contacto_id:
             busqueda = supabase.table("Contactos").select("id").eq("Correo", email_clean).execute()
             if busqueda.data and len(busqueda.data) > 0:
                 contacto_id = busqueda.data[0]["id"]
 
         if contacto_id:
-            # Si existe un ID (ya sea pasado por parámetro o encontrado), ACTUALIZAMOS la versión existente
+            # ACTUALIZAR
             supabase.table("Contactos").update(payload).eq("id", contacto_id).execute()
-            st.success(f"¡Contacto '{nom_final}' actualizado correctamente en '{estado_final}'!")
+            #st.success(f"¡Contacto actualizado correctamente en estado '{estado_final}'!") # Comentado para no saturar la UI
         else:
-            # Si definitivamente no existe, INSERTAMOS uno nuevo
+            # INSERTAR
             supabase.table("Contactos").insert(payload).execute()
-            st.success(f"¡Contacto '{nom_final}' creado correctamente en '{estado_final}'!")
+            #st.success(f"¡Contacto creado correctamente en estado '{estado_final}'!") # Comentado para no saturar la UI
             
     except Exception as err:
         st.error(f"Error al procesar en Supabase: {err}")
 
-    # Limpiar caché para que los gráficos del CRM lean los nuevos datos de inmediato
+    # 6. Forzar actualización inmediata del CRM
     st.cache_data.clear()
-    st.rerun()
         
 def eliminar_contacto(correo):
     """Elimina un contacto específico de la tabla Contactos en Supabase según su correo exacto."""
@@ -600,24 +600,24 @@ def generar_pdf(df_original):
     if 'Mes' in df.columns and 'Año' in df.columns:
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(200, 8, txt=safe_txt("Comparativa Ingresos Reales 2025 vs 2026"), ln=True)
-       
+        
         plt.figure(figsize=(7, 3.8))
         df_valid = df.dropna(subset=['Mes', 'Año'])
         pivot_df = df_valid.pivot_table(index='Mes', columns='Año', values='Monto', aggfunc='sum').fillna(0)
         pivot_df.plot(kind='bar', figsize=(7, 3.5), width=0.8)
-       
+        
         plt.title("Comparativa Ingresos Reales (Fecha de Pago) 2025 vs 2026", fontsize=10)
         plt.xlabel("Mes", fontsize=9)
         plt.ylabel("Monto Pagado", fontsize=9)
         plt.xticks(rotation=0)
         plt.legend(title="Año")
         plt.tight_layout()
-       
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
             plt.savefig(tmp.name, dpi=150)
             tmp_path = tmp.name
         plt.close()
-       
+        
         pdf.image(tmp_path, x=15, w=180)
         os.remove(tmp_path)
         pdf.ln(5)
@@ -626,25 +626,25 @@ def generar_pdf(df_original):
         if df_anio.empty:
             return
         empresa_data = df_anio.groupby('Empresa', as_index=False)['Monto'].sum().sort_values(by='Monto', ascending=True)
-       
+        
         plt.figure(figsize=(6, 3.2))
         plt.barh(empresa_data['Empresa'], empresa_data['Monto'], color='skyblue')
         plt.title(f"Ingresos Reales por Empresa ({anio})", fontsize=10)
         plt.xlabel("Monto Pagado ($)", fontsize=9)
         plt.ylabel("Empresa", fontsize=9)
         plt.tight_layout()
-       
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
             plt.savefig(tmp.name, dpi=150)
             tmp_path = tmp.name
         plt.close()
-       
+        
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(200, 7, txt=safe_txt(f"Ingresos Reales por Empresa - Año {anio}"), ln=True)
         pdf.image(tmp_path, x=25, w=150)
         os.remove(tmp_path)
         pdf.ln(2)
-       
+        
         pdf.set_font("Arial", 'B', 9)
         pdf.cell(200, 5, safe_txt(f"Detalle Empresas ({anio})"), ln=True)
         pdf.set_font("Arial", size=8)
@@ -658,7 +658,7 @@ def generar_pdf(df_original):
         if df_anio.empty:
             return
         servicio_data = df_anio.groupby('Grupo Servicio', as_index=False)['Monto'].sum()
-       
+        
         total_monto = servicio_data['Monto'].sum()
         if total_monto > 0:
             etiquetas_leyenda = [
@@ -667,7 +667,7 @@ def generar_pdf(df_original):
             ]
         else:
             etiquetas_leyenda = [f"{row['Grupo Servicio']} (0.0%)" for _, row in servicio_data.iterrows()]
-       
+        
         plt.figure(figsize=(6, 3.2))
         wedges, texts = plt.pie(
             servicio_data['Monto'],
@@ -677,18 +677,18 @@ def generar_pdf(df_original):
         plt.legend(wedges, etiquetas_leyenda, title="Servicios", loc="center left", bbox_to_anchor=(1, 0.5), fontsize=8)
         plt.title(f"Mix de Servicios Reales ({anio})", fontsize=10)
         plt.tight_layout()
-       
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
             plt.savefig(tmp.name, dpi=150, bbox_inches='tight')
             tmp_path = tmp.name
         plt.close()
-       
+        
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(200, 7, txt=safe_txt(f"Mix de Servicios Reales - Año {anio}"), ln=True)
         pdf.image(tmp_path, x=20, w=160)
         os.remove(tmp_path)
         pdf.ln(2)
-       
+        
         pdf.set_font("Arial", 'B', 9)
         pdf.cell(200, 5, safe_txt(f"Detalle Mix de Servicios ({anio})"), ln=True)
         pdf.set_font("Arial", size=8)
@@ -765,7 +765,7 @@ if check_password():
         "➕ Gestión de Facturas y Ciclo de Pago", 
         "🔥 Embudo Ventas"
     ])
-   
+    
     with tab1:
         st.info("💡 **Nota Financiera:** Todos los ingresos, gráficos y métricas mostrados a continuación reflejan exclusivamente los montos correspondientes a su **fecha de pago efectiva**.")
           
@@ -1009,12 +1009,12 @@ if check_password():
 
             st.divider()
             st.subheader(f"📈 Estacionalidad Mensual de Pagos por Planta: {planta_sel} ({empresa_sel})")
-           
+            
             df_planta_estacional = df_pagados_tab2[(df_pagados_tab2['Empresa'] == empresa_sel) & (df_pagados_tab2['Planta'] == planta_sel) & df_pagados_tab2['Año'].isin([2025, 2026])].dropna(subset=['Mes'])
-           
+            
             if not df_planta_estacional.empty:
                 df_estacional_planta = df_planta_estacional.groupby(['Año', 'Mes'])['Monto'].sum().reset_index()
-               
+                
                 fig_estacional_planta = px.line(
                     df_estacional_planta,
                     x='Mes',
@@ -1029,7 +1029,7 @@ if check_password():
                 st.info(f"💡 **Lectura de estacionalidad:** Este gráfico refleja el flujo de caja real ingresado mes a mes para la planta **{planta_sel}**.")
             else:
                 st.warning(f"No hay registros de pagos suficientes para mostrar la estacionalidad de la planta {planta_sel}.")
-           
+            
             st.divider()
             st.subheader(f"Análisis General de Estacionalidad de Pagos: {empresa_sel}")
             df_estacional = df_pagados_tab2[(df_pagados_tab2['Empresa'] == empresa_sel) & df_pagados_tab2['Año'].isin([2025, 2026])].dropna(subset=['Mes']).groupby(['Año', 'Mes'])['Monto'].sum().reset_index()
@@ -1048,7 +1048,7 @@ if check_password():
 
     with tab3:
         st.subheader("📊 Análisis de Servicios Pagados por Empresa")
-       
+        
         if 'Grupo Service' in df.columns:
             col_serv = 'Grupo Service'
         elif 'Grupo_Servicio' in df.columns:
@@ -1062,7 +1062,7 @@ if check_password():
         df_analisis = df.dropna(subset=['Fecha_Pago']).groupby(['Empresa', col_serv])['Monto'].sum().reset_index()
         if col_serv != 'Grupo Servicio':
             df_analisis = df_analisis.rename(columns={col_serv: 'Grupo Servicio'})
-       
+        
         fig_bar = px.bar(
             df_analisis,
             x="Empresa",
@@ -1110,10 +1110,10 @@ if check_password():
             df_abc = df_abc.sort_values(by='Monto', ascending=False)
             df_abc['Acumulado'] = df_abc['Monto'].cumsum()
             total_general_abc = df_abc['Monto'].sum()
-           
+            
             if total_general_abc > 0:
                 df_abc['Porcentaje_Acumulado'] = (df_abc['Acumulado'] / total_general_abc) * 100
-               
+                
                 def asignar_abc(p):
                     if p <= 80:
                         return 'Clase A (Alto Impacto)'
@@ -2058,7 +2058,8 @@ if check_password():
                                         planta=n_planta_ins.strip().upper() if n_planta_ins else str(r_c_fact.get('Planta', '')),
                                         valor=int(n_monto),
                                         rol=str(r_c_fact.get('Rol_Contacto', 'Finanzas / Compras')),
-                                        bitacora=str(r_c_fact.get('Bitacora', ''))
+                                        bitacora=str(r_c_fact.get('Bitacora', '')),
+                                        contacto_id=r_c_fact.get('id')
                                     )
                                 else:
                                     guardar_contacto(
@@ -2399,7 +2400,7 @@ if check_password():
 
                 if submitted:
                     if (nombre or empresa):
-                        exito = guardar_contacto(
+                        guardar_contacto(
                             nombre=nombre,
                             email=correo,
                             estado=estado,
@@ -2410,9 +2411,8 @@ if check_password():
                             rol=rol,
                             bitacora=bitacora_ini
                         )
-                        if exito:
-                            st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
-                            st.rerun()
+                        st.success(f"¡Cliente {nombre if nombre else empresa} registrado exitosamente en la nube!")
+                        st.rerun()
                     else:
                         st.warning("Por favor completa al menos el Nombre o Empresa.")
 
@@ -2431,7 +2431,7 @@ if check_password():
 
         st.subheader("📌 Tablero de Contactos por Etapa del Embudo (Edición Directa)")
         cols = st.columns(5)
-       
+        
         for i, col in enumerate(cols):
             with col:
                 st.subheader(estados[i])
@@ -2444,10 +2444,10 @@ if check_password():
                         st.write(f"🏭 Planta: {row.get('Planta')}")
                     st.write(f"💼 Rol: **{row.get('Rol_Contacto', 'Influenciador')}**")
                     st.write(f"💰 Valor: {monto_val_row}")
-                   
+                    
                     correo_contacto = row.get('Correo', row.get('email', ''))
                     nombre_contacto = row.get('Nombre', 'Cliente')
-                   
+                    
                     val_correo = correo_contacto.iloc[0] if hasattr(correo_contacto, "iloc") else correo_contacto
                     if isinstance(val_correo, (list, tuple)):
                         val_correo = val_correo[0] if len(val_correo) > 0 else ""
@@ -2460,9 +2460,9 @@ if check_password():
                         import urllib.parse
                         asunto_enc = urllib.parse.quote(asunto)
                         cuerpo_enc = urllib.parse.quote(cuerpo)
-                       
+                        
                         mailto_link = f"mailto:{val_correo_str}?subject={asunto_enc}&body={cuerpo_enc}"
-                       
+                        
                         st.markdown(
                             f"""
                             <a href="{mailto_link}" target="_blank" style="display:inline-block; padding:6px 12px; margin:4px 0px; font-size:12px; color:white; background-color:#2563eb; text-align:center; text-decoration:none; border-radius:4px; font-weight:600;">
@@ -2502,16 +2502,16 @@ if check_password():
                                     planta=qe_planta,
                                     valor=qe_valor,
                                     rol=qe_rol,
-                                    bitacora=str(row.get('Bitacora', ''))
+                                    bitacora=str(row.get('Bitacora', '')),
+                                    contacto_id=row.get('id')
                                 )
-                                st.cache_data.clear()
                                 st.success("¡Tarjeta actualizada en la nube!")
                                 st.rerun()
 
                     nota_actual = row.get('Bitacora', '')
                     if pd.isna(nota_actual):
                         nota_actual = ""
-                       
+                        
                     with st.expander(f"📝 Bitácora ({row.get('Nombre', 'Contacto')})"):
                         nueva_nota = st.text_area(
                             "Resumen de llamada/reunión:",
@@ -2523,7 +2523,7 @@ if check_password():
                             st.write("Registrar Evento en Línea de Tiempo")
                             tipo_inter = st.selectbox("Tipo de Interacción", ["Llamada Telefónica", "Reunión", "Correo Electrónico", "WhatsApp"], key=f"tipo_int_{idx}")
                             detalle_inter = st.text_input("Breve detalle del avance", key=f"det_int_{idx}")
-                           
+                            
                             if st.form_submit_button("➕ Añadir a Línea de Tiempo"):
                                 if detalle_inter.strip() != "":
                                     guardar_interaccion(
@@ -2532,12 +2532,11 @@ if check_password():
                                         tipo=tipo_inter,
                                         detalle=detalle_inter
                                     )
-                                    st.cache_data.clear()
                                     st.success("¡Interacción registrada en la nube!")
                                     st.rerun()
                                 else:
                                     st.warning("Escribe un detalle para la interacción.")
-                       
+                        
                         if nueva_nota.strip() != "":
                             nota_lower = nueva_nota.lower()
                             if any(w in nota_lower for w in ["excelente", "genial", "interesado", "positivo", "listo", "pagarán", "agendar"]):
@@ -2559,7 +2558,8 @@ if check_password():
                                     planta=row.get('Planta', ''),
                                     valor=row.get('Valor', 0),
                                     rol=row.get('Rol_Contacto', 'Influenciador'),
-                                    bitacora=nueva_nota
+                                    bitacora=nueva_nota,
+                                    contacto_id=row.get('id')
                                 )
                                 guardar_interaccion(
                                     nombre_contacto=row['Nombre'],
@@ -2567,7 +2567,6 @@ if check_password():
                                     tipo="Nota / Bitácora",
                                     detalle=nueva_nota[:80] + "..."
                                 )
-                                st.cache_data.clear()
                                 st.success("¡Bitácora sincronizada en Supabase!")
                                 st.rerun()
                         with col_b2:
@@ -2582,9 +2581,9 @@ if check_password():
                                     planta=row.get('Planta', ''),
                                     valor=row.get('Valor', 0),
                                     rol=row.get('Rol_Contacto', 'Influenciador'),
-                                    bitacora=nota_actual
+                                    bitacora=nota_actual,
+                                    contacto_id=row.get('id')
                                 )
-                                st.cache_data.clear()
                                 st.rerun()
 
                     with st.expander(f"⏱ Línea de Tiempo ({row.get('Nombre', 'Contacto')})"):
@@ -2597,40 +2596,39 @@ if check_password():
 
                     if st.button("🗑️ Borrar", key=f"del_{idx}"):
                         eliminar_contacto(val_correo_str)
-                        st.cache_data.clear()
                         st.rerun()
 
         st.divider()
 
         st.subheader("🎯 Calificación de Prospectos (Lead Scoring)")
 
-def calcular_lead_scoring(row):
-    """Calcula el lead score y la temperatura de forma segura manejando tipos de datos nulos o textos."""
-    try:
-        val_raw = row.get('Valor', 0) if isinstance(row, dict) else row['Valor'] if 'Valor' in row else 0
-        try:
-            valor = float(val_raw) if pd.notna(val_raw) and str(val_raw).strip() != '' else 0.0
-        except Exception:
-            valor = 0.0
+        def calcular_lead_scoring(row):
+            """Calcula el lead score y la temperatura de forma segura manejando tipos de datos nulos o textos."""
+            try:
+                val_raw = row.get('Valor', 0) if isinstance(row, dict) else row['Valor'] if 'Valor' in row else 0
+                try:
+                    valor = float(val_raw) if pd.notna(val_raw) and str(val_raw).strip() != '' else 0.0
+                except Exception:
+                    valor = 0.0
 
-        score = 0
-        if valor >= 3000000:
-            score += 40
-        elif valor >= 1000000:
-            score += 25
-        else:
-            score += 10
+                score = 0
+                if valor >= 3000000:
+                    score += 40
+                elif valor >= 1000000:
+                    score += 25
+                else:
+                    score += 10
 
-        if score >= 70:
-            temperatura = "Caliente"
-        elif score >= 40:
-            temperatura = "Tibio"
-        else:
-            temperatura = "Frío"
+                if score >= 70:
+                    temperatura = "Caliente"
+                elif score >= 40:
+                    temperatura = "Tibio"
+                else:
+                    temperatura = "Frío"
 
-        return pd.Series([score, temperatura])
-    except Exception:
-        return pd.Series([0, "Frío"])
+                return pd.Series([score, temperatura])
+            except Exception:
+                return pd.Series([0, "Frío"])
 
         if not df_contactos.empty:
             df_contactos[['Lead_Score', 'Temperatura_Lead']] = df_contactos.apply(calcular_lead_scoring, axis=1)
@@ -2869,8 +2867,8 @@ def calcular_lead_scoring(row):
                             planta=n_planta,
                             valor=n_valor,
                             rol=n_rol,
-                            bitacora=n_bitacora
+                            bitacora=n_bitacora,
+                            contacto_id=_get_scalar(row.get('id'))
                         )
-                        st.cache_data.clear()
                         st.success("¡Contacto actualizado con éxito en Supabase!")
                         st.rerun()
